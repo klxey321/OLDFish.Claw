@@ -1,0 +1,18 @@
+{
+  "status": "online",
+  "sessionsActive": 3,
+  "queueDepth": 2,
+  "taskLoad": 5,
+  "alerts": [
+    "示例告警：等待总办派单确认"
+  ],
+  "lastHeartbeatAt": "2026-03-14T12:00:00.000Z",
+  "connections": {
+    "gatewayConfigured": true,
+    "gatewayReachable": true,
+    "openclawReachable": true
+  },
+  "notes": [
+    "这是示例状态文件，部署时请改成真实值。"
+  ]
+}

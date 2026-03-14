@@ -1,0 +1,77 @@
+[
+  {
+    "instanceId": "master-hq",
+    "instanceName": "总办主脑",
+    "role": "master",
+    "department": "总办",
+    "region": "中国",
+    "machineIp": "10.0.0.10",
+    "baseUrl": "http://10.0.0.10:4310",
+    "summaryUrl": "http://10.0.0.10:4310/api/instance-summary",
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "uiPort": 4310,
+    "enabled": true,
+    "tags": ["master", "dispatch"]
+  },
+  {
+    "instanceId": "edge-design",
+    "instanceName": "日本狐蒂云",
+    "role": "edge",
+    "department": "设计部",
+    "region": "日本",
+    "machineIp": "10.0.0.21",
+    "baseUrl": "http://10.0.0.21:4311",
+    "summaryUrl": "http://10.0.0.21:4311/api/instance-summary",
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "uiPort": 4311,
+    "enabled": true,
+    "authTokenEnvKey": "EDGE_DESIGN_TOKEN",
+    "tags": ["edge", "design"]
+  },
+  {
+    "instanceId": "edge-ops",
+    "instanceName": "美国狐蒂云",
+    "role": "edge",
+    "department": "运营部",
+    "region": "美国",
+    "machineIp": "10.0.0.22",
+    "baseUrl": "http://10.0.0.22:4312",
+    "summaryUrl": "http://10.0.0.22:4312/api/instance-summary",
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "uiPort": 4312,
+    "enabled": true,
+    "authTokenEnvKey": "EDGE_OPS_TOKEN",
+    "tags": ["edge", "ops"]
+  },
+  {
+    "instanceId": "edge-sre",
+    "instanceName": "腾讯新加坡",
+    "role": "edge",
+    "department": "运维部",
+    "region": "新加坡",
+    "machineIp": "10.0.0.23",
+    "baseUrl": "http://10.0.0.23:4313",
+    "summaryUrl": "http://10.0.0.23:4313/api/instance-summary",
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "uiPort": 4313,
+    "enabled": true,
+    "authTokenEnvKey": "EDGE_SRE_TOKEN",
+    "tags": ["edge", "sre"]
+  },
+  {
+    "instanceId": "edge-copy",
+    "instanceName": "腾讯北京",
+    "role": "edge",
+    "department": "文案部",
+    "region": "北京",
+    "machineIp": "10.0.0.24",
+    "baseUrl": "http://10.0.0.24:4314",
+    "summaryUrl": "http://10.0.0.24:4314/api/instance-summary",
+    "gatewayUrl": "ws://127.0.0.1:18789",
+    "uiPort": 4314,
+    "enabled": true,
+    "authTokenEnvKey": "EDGE_COPY_TOKEN",
+    "tags": ["edge", "copy"]
+  }
+]
+

@@ -1,0 +1,15 @@
+[Unit]
+Description=OLDFish.Claw Master
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/oldfish-claw
+EnvironmentFile=/opt/oldfish-claw/.env
+ExecStart=/usr/bin/env npm run start:master
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
