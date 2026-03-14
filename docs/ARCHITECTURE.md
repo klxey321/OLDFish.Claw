@@ -53,6 +53,7 @@ Edge 生成：
 Master 读取：
 
 - `runtime/instances.json`
+- `runtime/work-items.json`
 
 ### Step 4
 
@@ -81,6 +82,10 @@ Master 汇总为：
 
 本机状态文件读取。
 
+### `src/runtime/work-items.ts`
+
+任务链路清单读取。
+
 ### `src/services/local-summary.ts`
 
 把本机状态转换成统一摘要。
@@ -95,7 +100,13 @@ HTTP 路由层。
 
 ### `src/ui/render.ts`
 
-当前的 Master / Edge 页面输出。
+当前的 Master / Edge 页面输出，包含：
+
+- 总览
+- 机器
+- 员工
+- 任务
+- 设置
 
 ## 5. 安全边界
 
@@ -115,4 +126,3 @@ HTTP 路由层。
 2. 增加机器页、员工页、任务页、设置页
 3. 增加更细的节点状态判定
 4. 增加总办主脑调度视图
-

@@ -4,7 +4,9 @@ import { buildLocalSummary } from "./services/local-summary";
 import { buildMasterSummary } from "./services/master-summary";
 import type { AppConfig } from "./types";
 import { loadInstances } from "./runtime/instances";
-import { renderEdgePage, renderMasterPage } from "./ui/render";
+import { loadWorkItems } from "./runtime/work-items";
+import { buildStaffViews } from "./services/control-room";
+import { renderEdgePage, renderMasterPage, type MasterSection } from "./ui/render";
 
 export function startServer(config: AppConfig) {
   const server = createServer(async (req, res) => {
@@ -61,6 +63,15 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
     return;
   }
 
+  if (url.pathname === "/api/work-items") {
+    if (config.role !== "master") {
+      writeJson(res, 404, { ok: false, error: "master_only" });
+      return;
+    }
+    writeJson(res, 200, await loadWorkItems(config.workItemsPath));
+    return;
+  }
+
   if (url.pathname === "/api/master-summary") {
     if (config.role !== "master") {
       writeJson(res, 404, { ok: false, error: "master_only" });
@@ -80,10 +91,44 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
     return;
   }
 
+  if (url.pathname === "/api/staff") {
+    if (config.role !== "master") {
+      writeJson(res, 404, { ok: false, error: "master_only" });
+      return;
+    }
+    const [summary, workItems] = await Promise.all([
+      buildMasterSummary(config),
+      loadWorkItems(config.workItemsPath),
+    ]);
+    writeJson(res, 200, buildStaffViews(summary, workItems));
+    return;
+  }
+
+  if (config.role === "master" && isMasterSectionRoute(url.pathname)) {
+    const [summary, instances, workItems] = await Promise.all([
+      buildMasterSummary(config),
+      loadInstances(config.instancesPath),
+      loadWorkItems(config.workItemsPath),
+    ]);
+    const staffViews = buildStaffViews(summary, workItems);
+    writeHtml(
+      res,
+      200,
+      renderMasterPage({
+        section: resolveMasterSection(url.pathname),
+        summary,
+        config,
+        staffViews,
+        workItems,
+        instances,
+      }),
+    );
+    return;
+  }
+
   if (url.pathname === "/") {
     if (config.role === "master") {
-      const summary = await buildMasterSummary(config);
-      writeHtml(res, 200, renderMasterPage(summary, config));
+      writeJson(res, 404, { ok: false, error: "master_section_resolution_failed" });
       return;
     }
 
@@ -124,3 +169,14 @@ function writeJson(res: ServerResponse, status: number, payload: unknown): void 
   res.end(JSON.stringify(payload, null, 2));
 }
 
+function isMasterSectionRoute(pathname: string): boolean {
+  return pathname === "/" || pathname === "/overview" || pathname === "/machines" || pathname === "/staff" || pathname === "/tasks" || pathname === "/settings";
+}
+
+function resolveMasterSection(pathname: string): MasterSection {
+  if (pathname === "/machines") return "machines";
+  if (pathname === "/staff") return "staff";
+  if (pathname === "/tasks") return "tasks";
+  if (pathname === "/settings") return "settings";
+  return "overview";
+}

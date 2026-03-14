@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AggregatedSummary, InstanceSummary } from "../src/types";
+import type { AggregatedSummary, AppConfig, InstanceConfig, InstanceSummary, StaffView, WorkItem } from "../src/types";
 import { renderEdgePage, renderMasterPage } from "../src/ui/render";
 
 const summary: InstanceSummary = {
@@ -54,7 +54,7 @@ test("renderMasterPage renders node cards", () => {
     },
   };
 
-  const html = renderMasterPage(dashboard, {
+  const config: AppConfig = {
     role: "master",
     host: "0.0.0.0",
     port: 4310,
@@ -70,6 +70,7 @@ test("renderMasterPage renders node cards", () => {
     codexHome: undefined,
     instancesPath: "/tmp/instances.json",
     localStatePath: "/tmp/local-state.json",
+    workItemsPath: "/tmp/work-items.json",
     localTokenAuthRequired: true,
     localApiToken: "",
     masterFetchTimeoutMs: 3000,
@@ -81,10 +82,58 @@ test("renderMasterPage renders node cards", () => {
     defaultAlerts: [],
     defaultGatewayReachable: true,
     defaultOpenclawReachable: true,
+  };
+  const staffViews: StaffView[] = [
+    {
+      instanceId: "master-hq",
+      nodeName: "总办主脑",
+      department: "总办",
+      region: "中国",
+      role: "master",
+      baseUrl: "http://10.0.0.10:4310",
+      state: "busy_running",
+      currentTask: "确认部署窗口",
+      recentOutput: "正在审阅总控部署。",
+      sourceStatus: "online",
+    },
+  ];
+  const workItems: WorkItem[] = [
+    {
+      workId: "dispatch-master-001",
+      title: "确认部署窗口",
+      department: "总办",
+      ownerInstanceId: "master-hq",
+      stage: "dispatch",
+      status: "ready",
+      priority: "p0",
+      summary: "确认部署窗口",
+      latestAction: "等待总办确认",
+      blockers: [],
+    },
+  ];
+  const instances: InstanceConfig[] = [
+    {
+      instanceId: "master-hq",
+      instanceName: "总办主脑",
+      role: "master",
+      department: "总办",
+      region: "中国",
+      machineIp: "10.0.0.10",
+      baseUrl: "http://10.0.0.10:4310",
+      enabled: true,
+    },
+  ];
+  const html = renderMasterPage({
+    section: "overview",
+    summary: dashboard,
+    config,
+    staffViews,
+    workItems,
+    instances,
   });
 
   assert(html.includes("MASTER CONTROL"));
   assert(html.includes("五节点态势"));
   assert(html.includes("总办主脑"));
+  assert(html.includes("待总办处理"));
 });
-

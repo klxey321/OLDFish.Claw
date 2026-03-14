@@ -28,6 +28,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     codexHome: readOptionalString(env.CODEX_HOME),
     instancesPath: resolve(readString(env.INSTANCES_PATH, "runtime/instances.json")),
     localStatePath: resolve(readString(env.LOCAL_STATE_PATH, "runtime/local-state.json")),
+    workItemsPath: resolve(readString(env.WORK_ITEMS_PATH, "runtime/work-items.json")),
     localTokenAuthRequired: readBool(env.LOCAL_TOKEN_AUTH_REQUIRED, true),
     localApiToken: readString(env.LOCAL_API_TOKEN, ""),
     masterFetchTimeoutMs: readInt(env.MASTER_FETCH_TIMEOUT_MS, 3500),
@@ -83,4 +84,3 @@ function readCsv(input: string | undefined): string[] {
     .map((item) => item.trim())
     .filter(Boolean);
 }
-

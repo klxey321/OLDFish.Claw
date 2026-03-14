@@ -10,7 +10,20 @@ export async function loadInstances(path: string): Promise<InstanceConfig[]> {
       .filter((item): item is InstanceConfig => item !== undefined)
       .sort((a, b) => a.instanceName.localeCompare(b.instanceName, "zh-Hans-CN"));
   } catch (error) {
-    if (isFsNotFound(error)) return [];
+    if (isFsNotFound(error)) {
+      const fallbackPath = path.replace(/\.json$/i, ".example.json");
+      try {
+        const parsed = JSON.parse(await readFile(fallbackPath, "utf8")) as unknown;
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .map(normalizeInstance)
+          .filter((item): item is InstanceConfig => item !== undefined)
+          .sort((a, b) => a.instanceName.localeCompare(b.instanceName, "zh-Hans-CN"));
+      } catch (innerError) {
+        if (isFsNotFound(innerError)) return [];
+        throw innerError;
+      }
+    }
     throw error;
   }
 }
@@ -73,4 +86,3 @@ function asNumber(input: unknown): number | undefined {
 function asRole(input: unknown): "master" | "edge" | undefined {
   return input === "master" || input === "edge" ? input : undefined;
 }
-

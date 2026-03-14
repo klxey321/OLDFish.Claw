@@ -1,0 +1,74 @@
+[
+  {
+    "workId": "dispatch-master-001",
+    "title": "确认五节点部署窗口",
+    "department": "总办",
+    "ownerInstanceId": "master-hq",
+    "stage": "dispatch",
+    "status": "ready",
+    "priority": "p0",
+    "summary": "总办需要确认 Master 与 4 台 Edge 的部署顺序和开放窗口。",
+    "latestAction": "等待总办确认最终部署时段。",
+    "blockers": [],
+    "dueAt": "今天 22:00",
+    "acceptanceNote": "部署窗口确认后进入执行阶段。"
+  },
+  {
+    "workId": "exec-design-002",
+    "title": "输出总览页机械黑客风视觉首屏",
+    "department": "设计部",
+    "ownerInstanceId": "edge-design",
+    "stage": "execution",
+    "status": "running",
+    "priority": "p1",
+    "summary": "设计部负责产出总览页、机器页和按钮系统的视觉草稿。",
+    "latestAction": "正在完善主脑视角首屏、状态徽章与操作按钮风格。",
+    "blockers": [],
+    "dueAt": "明天 12:00",
+    "acceptanceNote": "总办确认后进入交付。"
+  },
+  {
+    "workId": "exec-ops-003",
+    "title": "整理总办必看指标清单",
+    "department": "运营部",
+    "ownerInstanceId": "edge-ops",
+    "stage": "delivery",
+    "status": "review",
+    "priority": "p1",
+    "summary": "运营部汇总总办主脑每日必看指标与优先级顺序。",
+    "latestAction": "指标草单已提交，等待总办复核。",
+    "blockers": [],
+    "dueAt": "今天 18:00",
+    "acceptanceNote": "若无异议则转入验收。"
+  },
+  {
+    "workId": "exec-sre-004",
+    "title": "确认 Edge 内网互通与令牌策略",
+    "department": "运维部",
+    "ownerInstanceId": "edge-sre",
+    "stage": "execution",
+    "status": "blocked",
+    "priority": "p0",
+    "summary": "运维部需要打通 Master 到四台 Edge 的只读访问链路。",
+    "latestAction": "当前卡在一台节点未开放内网入口。",
+    "blockers": [
+      "一台 Edge 的反向代理入口尚未确认"
+    ],
+    "dueAt": "今天 20:00",
+    "acceptanceNote": "链路可达后再继续部署。"
+  },
+  {
+    "workId": "exec-copy-005",
+    "title": "统一状态文案与字段命名",
+    "department": "文案部",
+    "ownerInstanceId": "edge-copy",
+    "stage": "acceptance",
+    "status": "review",
+    "priority": "p2",
+    "summary": "文案部整理状态口径、字段命名与页面提示语。",
+    "latestAction": "文案清单已回传，等待最后验收。",
+    "blockers": [],
+    "dueAt": "明天 10:00",
+    "acceptanceNote": "通过后固化进页面。"
+  }
+]

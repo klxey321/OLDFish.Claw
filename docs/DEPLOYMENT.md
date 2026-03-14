@@ -52,6 +52,7 @@ NODE_NAME=总办主脑
 DEPARTMENT=总办
 PORT=4310
 INSTANCES_PATH=runtime/instances.json
+WORK_ITEMS_PATH=runtime/work-items.json
 LOCAL_API_TOKEN=<master-token>
 ```
 
@@ -105,6 +106,7 @@ Master 需要一份实例注册表。
 
 ```bash
 cp runtime/instances.example.json runtime/instances.json
+cp runtime/work-items.example.json runtime/work-items.json
 ```
 
 然后填写真实信息：
@@ -116,6 +118,16 @@ cp runtime/instances.example.json runtime/instances.json
 - `baseUrl`
 - `summaryUrl`
 - `authTokenEnvKey`
+
+任务文件中建议填写：
+
+- `title`
+- `department`
+- `ownerInstanceId`
+- `stage`
+- `status`
+- `priority`
+- `latestAction`
 
 ## 6. 状态文件
 
@@ -150,6 +162,8 @@ curl -H "x-local-token: <edge-token>" http://127.0.0.1:<edge-port>/api/instance-
 ```bash
 curl http://127.0.0.1:4310/healthz
 curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/master-summary
+curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/work-items
+curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/staff
 ```
 
 ## 8. 反向代理建议
@@ -172,4 +186,3 @@ curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/master-summary
 
 - `deploy/master.service.example`
 - `deploy/edge.service.example`
-

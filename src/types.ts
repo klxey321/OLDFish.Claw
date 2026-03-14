@@ -1,6 +1,8 @@
 export type AppRole = "master" | "edge";
 export type HealthState = "online" | "degraded" | "offline" | "unknown";
 export type SummarySource = "local" | "remote" | "synthetic";
+export type WorkStage = "dispatch" | "execution" | "delivery" | "acceptance";
+export type WorkStatus = "ready" | "running" | "blocked" | "review" | "done";
 
 export interface InstanceConfig {
   instanceId: string;
@@ -77,6 +79,37 @@ export interface AggregatedSummary {
   };
 }
 
+export interface StaffView {
+  instanceId: string;
+  nodeName: string;
+  department: string;
+  region: string;
+  role: AppRole;
+  baseUrl: string;
+  state: "online_ready" | "busy_running" | "blocked_waiting" | "offline_maintenance";
+  currentTask?: string;
+  recentOutput: string;
+  blocker?: string;
+  expectedDelivery?: string;
+  acceptanceNote?: string;
+  sourceStatus: HealthState;
+}
+
+export interface WorkItem {
+  workId: string;
+  title: string;
+  department: string;
+  ownerInstanceId: string;
+  stage: WorkStage;
+  status: WorkStatus;
+  priority: "p0" | "p1" | "p2";
+  summary: string;
+  latestAction: string;
+  blockers: string[];
+  dueAt?: string;
+  acceptanceNote?: string;
+}
+
 export interface AppConfig {
   role: AppRole;
   host: string;
@@ -93,6 +126,7 @@ export interface AppConfig {
   codexHome?: string;
   instancesPath: string;
   localStatePath: string;
+  workItemsPath: string;
   localTokenAuthRequired: boolean;
   localApiToken: string;
   masterFetchTimeoutMs: number;
@@ -105,4 +139,3 @@ export interface AppConfig {
   defaultGatewayReachable: boolean;
   defaultOpenclawReachable: boolean;
 }
-
