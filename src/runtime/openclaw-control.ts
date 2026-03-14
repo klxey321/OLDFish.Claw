@@ -322,7 +322,7 @@ function ensureAllowedOrigins(config: OpenClawConfigFile, appConfig: AppConfig):
 
 async function restartGatewayProcess(): Promise<void> {
   try {
-    const { stdout } = await execFileAsync("pgrep", ["-x", "openclaw-gateway"]);
+    const { stdout } = await execFileAsync("pgrep", ["-f", "openclaw-gateway"]);
     const pids = stdout
       .split(/\s+/)
       .map((value) => Number.parseInt(value, 10))
