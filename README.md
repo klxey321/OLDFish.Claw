@@ -1,25 +1,73 @@
 # OLDFish.Claw
 
-`OLDFish.Claw` 是为 `4 Edge + 1 Master` 架构重写的控制面板仓库。
+`OLDFish.Claw` 是一套面向 `总办主脑 + 四部门节点` 的控制面板项目。
 
-它不再沿用官方 `OpenClaw Control Center` 的页面与项目结构，而是直接围绕你的实际组织方式重构：
+当前组织结构固定为：
 
-- `1 台 Master`：总办主脑，负责摘要、派单、调度
-- `4 台 Edge`：设计部、运营部、运维部、文案部
-- Master 机器自身也运行 OpenClaw，因此既是主控，也是实际节点
+- `Master / 总办主脑`
+- `Edge / 设计部 / 日本狐蒂云`
+- `Edge / 运营部 / 美国狐蒂云`
+- `Edge / 运维部 / 腾讯新加坡`
+- `Edge / 文案部 / 腾讯北京`
 
-## 特性
+这套项目不是通用控制台，而是围绕我们自己的调度方式重写：
 
-- 单仓、TypeScript、Node.js
-- `Master / Edge` 双角色运行模式
-- 机械黑客风格 UI
-- 默认只读
-- 支持本地令牌保护只读 API
-- Master 汇总 4 台 Edge 的实例摘要
-- 支持 `runtime/instances.json` 实例注册
-- 支持 `runtime/local-state.json` 本机状态注入
+- 总办主脑看摘要
+- 总办主脑安排四个部门节点干活
+- 四个部门节点各自汇报本机状态
+- 面板整体风格走 `机械 + 黑客 + 控制台` 路线
 
-## 目录
+## 项目定位
+
+`OLDFish.Claw` 当前分成两个角色：
+
+### Master
+
+Master 部署在总办机器上，负责：
+
+- 看总办本机状态
+- 汇总四台 Edge 摘要
+- 看节点在线、阻塞、任务压力、告警数量
+- 作为总办主脑的统一入口
+
+### Edge
+
+Edge 部署在四个部门节点机器上，负责：
+
+- 读取本机状态
+- 输出本机只读摘要
+- 为 Master 提供统一接口
+
+## 当前已完成
+
+当前仓库已经完成第一轮全重写，包含：
+
+- 全新的 `Master + Edge` 项目骨架
+- 新的暗色机械黑客风基础页面
+- `runtime/instances.example.json` 实例注册模板
+- `runtime/local-state.example.json` 本机状态模板
+- Master 聚合摘要接口
+- Edge 本机摘要接口
+- 新的部署文档和 systemd 示例
+
+## 页面方向
+
+当前页面方向已经切到 `OLDFish.Claw` 自己的风格，不再沿用旧项目视觉：
+
+- 暗色高对比
+- 机械面板感
+- 终端/控制台气质
+- 适合总办主脑做调度判断
+
+后续会继续补全：
+
+- 总览页
+- 机器页
+- 员工页
+- 任务页
+- 设置页
+
+## 仓库结构
 
 ```text
 src/
@@ -39,6 +87,7 @@ deploy/
 docs/
   ARCHITECTURE.md
   DEPLOYMENT.md
+  BRAND.md
 test/
 ```
 
@@ -50,73 +99,66 @@ cp .env.example .env
 npm run dev:master
 ```
 
-Edge 模式：
+如果你要启动部门节点模式：
 
 ```bash
 npm run dev:edge
 ```
 
-## 运行模式
-
-### Master
-
-Master 页面职责：
-
-- 查看总办主脑本机状态
-- 聚合四台 Edge 摘要
-- 看节点在线、阻塞、会话、任务压力
-- 给总办提供调度入口和摘要判断
-
-### Edge
-
-Edge 页面职责：
-
-- 仅展示本机节点状态
-- 对 Master 提供只读摘要接口
-- 为部署调试提供健康检查和运行说明
-
 ## 关键文件
 
-- `runtime/instances.example.json`
-  四个 Edge 加一个 Master 的实例清单模板
+### `runtime/instances.example.json`
 
-- `runtime/local-state.example.json`
-  单机状态注入模板，可用于先把面板跑起来
+五节点实例模板，包含：
 
-- `deploy/master.service.example`
-  Master 的 systemd 模板
+- 1 台 Master
+- 4 台 Edge
 
-- `deploy/edge.service.example`
-  Edge 的 systemd 模板
+### `runtime/local-state.example.json`
+
+单节点本机状态模板，用来先把页面和接口跑起来。
+
+### `deploy/master.service.example`
+
+总办主脑机器上的 systemd 模板。
+
+### `deploy/edge.service.example`
+
+部门节点机器上的 systemd 模板。
 
 ## API
 
-- `GET /`
-  当前角色页面
+### `GET /`
 
-- `GET /healthz`
-  健康检查
+当前节点页面。
 
-- `GET /api/instance-summary`
-  本机实例摘要
+### `GET /healthz`
 
-- `GET /api/master-summary`
-  仅 Master：聚合五节点摘要
+基础健康检查。
 
-- `GET /api/instances`
-  仅 Master：实例注册清单
+### `GET /api/instance-summary`
 
-## 安全部署约束
+当前节点只读摘要。
+
+### `GET /api/master-summary`
+
+仅 Master：聚合 4 Edge + 1 Master 摘要。
+
+### `GET /api/instances`
+
+仅 Master：返回实例注册清单。
+
+## 安全原则
 
 - 默认只读
-- 不直接跨机器挂载远端目录
-- Edge 只对 Master 暴露只读摘要
-- 推荐用内网、VPN 或 Tailscale
-- 如果配置了 `LOCAL_API_TOKEN`，Master 拉 Edge 摘要时应带对应令牌
+- 不跨机器挂载远端目录
+- Edge 只暴露只读摘要给 Master
+- 推荐走内网、VPN 或 Tailscale
+- 如启用 `LOCAL_API_TOKEN`，则摘要接口受本地令牌保护
 
-## 开发分支
+## 文档
 
-当前全重写开发分支：
-
-- `codex/rebuild-from-scratch`
+- [架构说明](docs/ARCHITECTURE.md)
+- [部署说明](docs/DEPLOYMENT.md)
+- [品牌与视觉说明](docs/BRAND.md)
 
