@@ -245,4 +245,6 @@ test("renderMasterPage renders node cards", () => {
   assert(html.includes("待总办处理"));
   assert(html.includes("聊天"));
   assert(html.includes("模型控制台"));
+  assert(html.includes("data-model-switch-form"));
+  assert(html.includes("切换主模型"));
 });

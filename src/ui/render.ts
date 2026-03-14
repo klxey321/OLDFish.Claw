@@ -449,7 +449,7 @@ function renderModelControlPanel(
   catalog: ModelCatalogSnapshot,
   options: { compact?: boolean } = {},
 ): string {
-  const modelCards = catalog.models.slice(0, options.compact ? 6 : 10);
+  const modelRows = catalog.models.slice(0, options.compact ? 6 : 14);
   return `<article class="panel panel-large">
     <div class="eyebrow">模型控制台</div>
     <h2>查看、添加、切换 AI 模型</h2>
@@ -460,8 +460,24 @@ function renderModelControlPanel(
     }
     ${
       catalog.connected
-        ? `<div class="stack-list model-stack">${modelCards.map(renderModelCard).join("")}</div>
-           <div class="meta">Provider：${catalog.providers.map((item) => `${item.key} (${item.modelCount})`).join(" · ") || "未发现"}。</div>
+        ? `<form class="model-switcher" data-model-switch-form>
+             <label class="model-select-field">
+               <span>默认模型</span>
+               <select name="modelRef">
+                 ${catalog.models.map(renderModelSelectOption).join("")}
+               </select>
+             </label>
+             <button class="action-btn" type="submit">切换主模型</button>
+           </form>
+           <div class="facet-row model-provider-pills">
+             ${catalog.providers.map((item) => `<span class="mini-pill">${escapeHtml(item.key)} · ${item.modelCount}</span>`).join("")}
+           </div>
+           <div class="stack-list model-compact-list">${modelRows.map(renderModelRow).join("")}</div>
+           ${
+             catalog.models.length > modelRows.length
+               ? `<div class="meta">已显示 ${modelRows.length} / ${catalog.models.length} 个模型，完整切换请直接用上方下拉框。</div>`
+               : `<div class="meta">已载入 ${catalog.models.length} 个模型，可直接从上方下拉框切换。</div>`
+           }
            <form class="model-form" data-add-model-form>
              <label>
                <span>Provider</span>
@@ -510,7 +526,7 @@ function renderChatQuickPanel(access: NativeChatAccess): string {
     <h2>原生聊天工作台</h2>
     <div class="copy-box">你要的暂停、删历史、随时插手会话，直接走原生聊天页最稳，不会丢官方刚补上的能力。</div>
     <ul class="detail-list">
-      <li>接入方式：总办域名下的内嵌代理路径。</li>
+      <li>接入方式：${access.framePath.startsWith("http://") || access.framePath.startsWith("https://") ? "官方聊天域名内嵌" : "总办域名下的内嵌代理路径"}。</li>
       <li>会话来源：当前主脑 OpenClaw 的真实 session store。</li>
       <li>跳转：菜单新增 <code>聊天</code> 页面。</li>
     </ul>
@@ -723,27 +739,23 @@ function renderInstanceCard(instance: InstanceConfig): string {
   </div>`;
 }
 
-function renderModelCard(model: ModelCatalogSnapshot["models"][number]): string {
-  return `<div class="model-card">
-    <div class="machine-head">
-      <div>
-        <div class="eyebrow">${escapeHtml(model.providerKey)}</div>
-        <h3>${escapeHtml(model.name)}</h3>
-      </div>
-      <div class="badge-row">
-        ${model.isPrimary ? `<span class="badge badge-running">主模型</span>` : ""}
-        ${model.isFallback ? `<span class="badge badge-review">回退</span>` : ""}
-      </div>
+function renderModelSelectOption(model: ModelCatalogSnapshot["models"][number]): string {
+  return `<option value="${escapeHtml(model.id)}"${model.isPrimary ? " selected" : ""}>${escapeHtml(model.name)} · ${escapeHtml(model.providerKey)}</option>`;
+}
+
+function renderModelRow(model: ModelCatalogSnapshot["models"][number]): string {
+  return `<div class="stack-item model-row">
+    <div class="model-row-main">
+      <strong>${escapeHtml(model.name)}</strong>
+      <span><code>${escapeHtml(model.id)}</code></span>
     </div>
-    <ul class="detail-list">
-      <li>ID：<code>${escapeHtml(model.id)}</code></li>
-      <li>API：${escapeHtml(model.api ?? "未标注")}</li>
-      <li>Reasoning：${model.reasoning ? "开启" : "关闭"}</li>
-      <li>上下文：${model.contextWindow ? formatInt(model.contextWindow) : "未标注"}</li>
-    </ul>
-    <div class="chat-quick-actions">
-      <button class="action-btn" type="button" data-set-primary-model="${escapeHtml(model.id)}"${model.isPrimary ? " disabled" : ""}>设为主模型</button>
-      <span class="meta">切换后自动热重载 Gateway。</span>
+    <div class="model-row-meta">
+      <span class="mini-pill">${escapeHtml(model.providerKey)}</span>
+      ${model.api ? `<span class="mini-pill">${escapeHtml(model.api)}</span>` : ""}
+      ${model.reasoning ? `<span class="mini-pill">reasoning</span>` : ""}
+      ${model.contextWindow ? `<span class="mini-pill">ctx ${formatInt(model.contextWindow)}</span>` : ""}
+      ${model.isPrimary ? `<span class="mini-pill is-primary">主模型</span>` : ""}
+      ${model.isFallback ? `<span class="mini-pill is-fallback">回退</span>` : ""}
     </div>
   </div>`;
 }
@@ -885,20 +897,33 @@ function renderAppScript(config: AppConfig): string {
         });
       });
 
+      const switchPrimaryModel = async (modelRef, trigger) => {
+        if (!modelRef) return;
+        if (!window.confirm("确认把默认模型切到 " + modelRef + "？这会热重载 Gateway。")) return;
+        try {
+          trigger?.setAttribute("disabled", "disabled");
+          await postJson("/api/models/primary", { modelRef });
+          window.location.reload();
+        } catch (error) {
+          trigger?.removeAttribute("disabled");
+          window.alert("切换模型失败：" + (error instanceof Error ? error.message : String(error)));
+        }
+      };
+
       document.querySelectorAll("[data-set-primary-model]").forEach((button) => {
         button.addEventListener("click", async () => {
           const modelRef = button.getAttribute("data-set-primary-model");
-          if (!modelRef) return;
-          if (!window.confirm("确认把默认模型切到 " + modelRef + "？这会热重载 Gateway。")) return;
-          try {
-            button.setAttribute("disabled", "disabled");
-            await postJson("/api/models/primary", { modelRef });
-            window.location.reload();
-          } catch (error) {
-            button.removeAttribute("disabled");
-            window.alert("切换模型失败：" + (error instanceof Error ? error.message : String(error)));
-          }
+          await switchPrimaryModel(modelRef, button);
         });
+      });
+
+      document.querySelector("[data-model-switch-form]")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const modelSelect = form.querySelector('select[name="modelRef"]');
+        const submitter = form.querySelector('button[type="submit"]');
+        const modelRef = modelSelect?.value?.trim() || "";
+        await switchPrimaryModel(modelRef, submitter);
       });
 
       document.querySelector("[data-add-model-form]")?.addEventListener("submit", async (event) => {
@@ -1296,13 +1321,59 @@ function renderLayout(title: string, body: string): string {
           word-break: break-word;
         }
         .badge-row, .chat-quick-actions, .native-chat-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .model-card {
-          padding: 16px;
-          border-radius: 24px;
-          border: 1px solid rgba(121, 240, 255, 0.12);
-          background: rgba(255, 255, 255, 0.025);
+        .model-switcher {
+          margin: 14px 0 10px;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 12px;
+          align-items: end;
         }
-        .model-stack { margin: 14px 0; }
+        .model-select-field {
+          display: grid;
+          gap: 8px;
+          color: var(--muted);
+        }
+        .model-provider-pills { margin-top: 0; margin-bottom: 12px; }
+        .model-compact-list { margin: 12px 0; gap: 10px; }
+        .model-row {
+          display: grid;
+          gap: 10px;
+          padding: 13px 15px;
+        }
+        .model-row-main {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .model-row-main code { font-size: 12px; }
+        .model-row-meta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .mini-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 5px 9px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(121, 240, 255, 0.12);
+          color: var(--muted);
+          font-family: var(--mono);
+          font-size: 11px;
+          letter-spacing: 0.04em;
+        }
+        .mini-pill.is-primary {
+          background: rgba(121, 240, 255, 0.12);
+          color: var(--accent);
+        }
+        .mini-pill.is-fallback {
+          background: rgba(255, 208, 92, 0.14);
+          color: var(--warn);
+        }
         .model-form {
           margin-top: 16px;
           display: grid;
@@ -1386,7 +1457,7 @@ function renderLayout(title: string, body: string): string {
           .sidebar, .main-column, .rail { position: static; }
           .rail { display: grid; gap: 16px; }
           .staff-list-copy { text-align: left; }
-          .model-form { grid-template-columns: 1fr; }
+          .model-switcher, .model-form { grid-template-columns: 1fr; }
           .native-chat-frame-wrap, .native-chat-frame { min-height: 760px; }
         }
       </style>

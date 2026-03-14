@@ -10,6 +10,9 @@ const NATIVE_CHAT_BASE_PATH = "/__native-chat";
 interface OpenClawConfigFile {
   gateway?: {
     port?: number;
+    controlUi?: {
+      allowedOrigins?: string[];
+    };
     auth?: {
       token?: string;
     };
@@ -103,6 +106,11 @@ export async function loadNativeChatAccess(config: AppConfig): Promise<NativeCha
       framePath: `${NATIVE_CHAT_BASE_PATH}/chat`,
       note: "Gateway token 未配置，无法自动接入原生聊天页。",
     };
+  }
+
+  if (ensureAllowedOrigins(bundle.config, config)) {
+    await saveConfigBundle(bundle);
+    await restartGatewayProcess();
   }
 
   const dashboardOrigin = normalizeDashboardUrl(config.dashboardUrl);
@@ -293,6 +301,25 @@ function ensureDefaultModelConfig(config: OpenClawConfigFile) {
   return config.agents.defaults.model;
 }
 
+function ensureAllowedOrigins(config: OpenClawConfigFile, appConfig: AppConfig): boolean {
+  if (!config.gateway) config.gateway = {};
+  if (!config.gateway.controlUi) config.gateway.controlUi = {};
+
+  const nextOrigins = uniqueStrings([
+    ...(config.gateway.controlUi.allowedOrigins ?? []),
+    normalizeOrigin(appConfig.baseUrl),
+    normalizeOrigin(appConfig.dashboardUrl),
+  ]);
+
+  const currentOrigins = config.gateway.controlUi.allowedOrigins ?? [];
+  const changed =
+    currentOrigins.length !== nextOrigins.length ||
+    currentOrigins.some((value, index) => value !== nextOrigins[index]);
+
+  if (changed) config.gateway.controlUi.allowedOrigins = nextOrigins;
+  return changed;
+}
+
 async function restartGatewayProcess(): Promise<void> {
   try {
     const { stdout } = await execFileAsync("pgrep", ["-x", "openclaw-gateway"]);
@@ -317,6 +344,18 @@ function normalizeDashboardUrl(value: string | undefined): string | undefined {
   const normalized = normalizeText(value);
   if (!normalized) return undefined;
   return normalized.replace(/\/+$/, "");
+}
+
+function normalizeOrigin(value: string | undefined): string | undefined {
+  const normalized = normalizeDashboardUrl(value);
+  if (!normalized) return undefined;
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return undefined;
+  }
 }
 
 function toPositiveNumber(value: number | undefined): number | undefined {
