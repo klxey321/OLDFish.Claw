@@ -408,6 +408,7 @@ function renderSettingsSection(input: MasterRenderInput): string {
 function renderChatSection(input: MasterRenderInput): string {
   const access = input.nativeChatAccess;
   const accessPayload = JSON.stringify(access);
+  const displayPath = displayNativeChatPath(access.framePath);
   return `
     <section class="grid-two">
       <article class="panel panel-large">
@@ -415,7 +416,7 @@ function renderChatSection(input: MasterRenderInput): string {
         <h2>OpenClaw Chat 已同步</h2>
         <div class="copy-box">这里直接接入原生 Web UI，所以暂停任务、删除历史、Slash 命令和会话侧边栏都和现在的 OpenClaw 一致。</div>
         <ul class="detail-list">
-          <li>入口：${access.enabled ? `<code>${escapeHtml(access.framePath)}</code>` : "未接通"}</li>
+          <li>入口：${access.enabled ? `<code>${escapeHtml(displayPath)}</code>` : "未接通"}</li>
           <li>能力：暂停运行、删除历史、切换会话、查看实时流。</li>
           <li>接线：通过总办主脑的 Gateway 反代路径，不单独暴露新的公网端口。</li>
         </ul>
@@ -957,7 +958,16 @@ function renderAppScript(config: AppConfig): string {
         if (!nativeChatScript || !nativeChatFrame) return;
         try {
           const access = JSON.parse(nativeChatScript.textContent || "{}");
-          if (!access.enabled || !access.gatewayToken || !access.basePath || !access.framePath) {
+          if (!access.enabled || !access.framePath) {
+            setNativeChatStatus(access.note || "原生聊天入口未接通。");
+            return;
+          }
+          if (access.framePath.startsWith("http://") || access.framePath.startsWith("https://")) {
+            setNativeChatStatus("正在加载原生聊天面板...");
+            nativeChatFrame.src = access.framePath;
+            return;
+          }
+          if (!access.gatewayToken || !access.basePath) {
             setNativeChatStatus(access.note || "原生聊天入口未接通。");
             return;
           }
@@ -1477,6 +1487,10 @@ function shortenText(value: string, limit: number): string {
 
 function formatInt(value: number): string {
   return value.toLocaleString("zh-CN");
+}
+
+function displayNativeChatPath(value: string): string {
+  return value.split("#")[0] || value;
 }
 
 function serializeJsonForHtml(value: string): string {

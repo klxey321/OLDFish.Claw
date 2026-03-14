@@ -278,6 +278,7 @@ export interface AppConfig {
   region: string;
   machineIp: string;
   baseUrl: string;
+  dashboardUrl?: string;
   gatewayUrl?: string;
   openclawHome?: string;
   codexHome?: string;

@@ -65,6 +65,7 @@ test("renderMasterPage renders node cards", () => {
     region: "中国",
     machineIp: "10.0.0.10",
     baseUrl: "http://10.0.0.10:4310",
+    dashboardUrl: undefined,
     gatewayUrl: "ws://127.0.0.1:18789",
     openclawHome: undefined,
     codexHome: undefined,

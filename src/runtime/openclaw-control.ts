@@ -105,6 +105,15 @@ export async function loadNativeChatAccess(config: AppConfig): Promise<NativeCha
     };
   }
 
+  const dashboardOrigin = normalizeDashboardUrl(config.dashboardUrl);
+  if (dashboardOrigin) {
+    return {
+      enabled: true,
+      basePath: dashboardOrigin,
+      framePath: `${dashboardOrigin}/chat#token=${encodeURIComponent(token)}`,
+    };
+  }
+
   return {
     enabled: true,
     basePath: NATIVE_CHAT_BASE_PATH,
@@ -302,6 +311,12 @@ async function restartGatewayProcess(): Promise<void> {
 
 function normalizeText(value: string | undefined | null): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeDashboardUrl(value: string | undefined): string | undefined {
+  const normalized = normalizeText(value);
+  if (!normalized) return undefined;
+  return normalized.replace(/\/+$/, "");
 }
 
 function toPositiveNumber(value: number | undefined): number | undefined {

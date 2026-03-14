@@ -23,6 +23,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     region,
     machineIp,
     baseUrl,
+    dashboardUrl: readOptionalString(env.OPENCLAW_DASHBOARD_URL),
     gatewayUrl: readOptionalString(env.GATEWAY_URL),
     openclawHome: readOptionalString(env.OPENCLAW_HOME),
     codexHome: readOptionalString(env.CODEX_HOME),
