@@ -54,6 +54,10 @@ PORT=4310
 INSTANCES_PATH=runtime/instances.json
 WORK_ITEMS_PATH=runtime/work-items.json
 LOCAL_API_TOKEN=<master-token>
+FILE_EDIT_ENABLED=true
+TASK_CONTROL_ENABLED=true
+OPENCLAW_HOME=/root/.openclaw
+OPENCLAW_SUBSCRIPTION_SNAPSHOT_PATH=<optional-subscription-snapshot>
 ```
 
 ### 启动
@@ -83,6 +87,7 @@ DEPARTMENT=设计部
 PORT=4311
 LOCAL_STATE_PATH=runtime/local-state.json
 LOCAL_API_TOKEN=<edge-token>
+OPENCLAW_HOME=/root/.openclaw
 ```
 
 启动：
@@ -128,6 +133,8 @@ cp runtime/work-items.example.json runtime/work-items.json
 - `status`
 - `priority`
 - `latestAction`
+- `crew`
+- `sessionKeys`
 
 ## 6. 状态文件
 
@@ -164,6 +171,9 @@ curl http://127.0.0.1:4310/healthz
 curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/master-summary
 curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/work-items
 curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/staff
+curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/usage
+curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/agents
+curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/schedules
 ```
 
 ## 8. 反向代理建议
@@ -173,6 +183,7 @@ curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/staff
 - Master 前面挂 `nginx` 或 `caddy`
 - Edge 仅对 Master 所在网络开放
 - 优先走内网、VPN 或 Tailscale
+- 域名只有在 DNS 真实解析到主控机或前置反向代理时，才能签发 HTTPS 证书
 
 不推荐：
 

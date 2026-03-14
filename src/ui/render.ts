@@ -1,6 +1,17 @@
-import type { AggregatedSummary, AppConfig, InstanceConfig, InstanceSummary, StaffView, WorkItem } from "../types";
+import type {
+  AggregatedSummary,
+  AppConfig,
+  DashboardInsights,
+  InstanceConfig,
+  InstanceSummary,
+  StaffTaskSummary,
+  StaffView,
+  WorkItem,
+  WorkbenchFileDetail,
+  WorkbenchSnapshot,
+} from "../types";
 
-export type MasterSection = "overview" | "machines" | "staff" | "tasks" | "settings";
+export type MasterSection = "overview" | "usage" | "machines" | "staff" | "memory" | "docs" | "tasks" | "settings";
 
 interface MasterRenderInput {
   section: MasterSection;
@@ -9,37 +20,45 @@ interface MasterRenderInput {
   staffViews: StaffView[];
   workItems: WorkItem[];
   instances: InstanceConfig[];
+  insights: DashboardInsights;
+  selectedStaffId?: string;
+  selectedFile?: WorkbenchFileDetail;
+  notice?: string;
 }
 
 export function renderMasterPage(input: MasterRenderInput): string {
   const title = `OLDFish.Claw ${sectionLabel(input.section)}`;
   const body = `
-    <div class="shell">
+    <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand-card">
-          <div class="brand-chip">MASTER CORE</div>
+        <div class="brand-panel">
+          <div class="brand-chip">MASTER BRAIN</div>
           <h1>OLDFish.Claw</h1>
-          <p>总办主脑控制 4 台 Edge 节点，负责摘要、派单、调度和风险判断。</p>
-          <div class="brand-meta">节点数 ${input.summary.totals.total} · 在线 ${input.summary.totals.online} · 刷新 ${input.config.uiRefreshSeconds}s</div>
+          <p>总办主脑负责 4 台 Edge 调度、审阅、派单与风险收口。</p>
+          <div class="brand-meta">节点 ${input.summary.totals.total} · 在线 ${input.summary.totals.online} · 刷新 ${input.config.uiRefreshSeconds}s</div>
         </div>
         <nav class="nav-list">
           ${renderNavLink("overview", input.section)}
+          ${renderNavLink("usage", input.section)}
           ${renderNavLink("machines", input.section)}
           ${renderNavLink("staff", input.section)}
+          ${renderNavLink("memory", input.section)}
+          ${renderNavLink("docs", input.section)}
           ${renderNavLink("tasks", input.section)}
           ${renderNavLink("settings", input.section)}
         </nav>
-        <section class="side-panel">
-          <div class="eyebrow">主脑状态</div>
-          <div class="side-kpi">${statusLabel(input.summary.master.status)}</div>
-          <div class="side-copy">本机会话 ${input.summary.master.sessionsActive} · 本机队列 ${input.summary.master.queueDepth}</div>
-        </section>
       </aside>
-      <main class="content">
-        ${renderMasterHero(input)}
+      <main class="main-column">
+        ${input.notice ? `<div class="notice-banner">${escapeHtml(input.notice)}</div>` : ""}
+        ${renderHero(input)}
         ${renderSection(input)}
       </main>
-    </div>`;
+      <aside class="rail">
+        ${renderStatusRail(input)}
+      </aside>
+    </div>
+    ${renderAppScript(input.config)}
+  `;
 
   return renderLayout(title, body);
 }
@@ -52,16 +71,16 @@ export function renderEdgePage(summary: InstanceSummary): string {
         <div>
           <div class="brand-chip">EDGE NODE</div>
           <h1>${escapeHtml(summary.instanceName)}</h1>
-          <p>${escapeHtml(summary.department)} 节点，向 Master 提供只读摘要。</p>
+          <p>${escapeHtml(summary.department)} 节点向主脑汇报会话、任务、心跳与接线状态。</p>
         </div>
         <div class="hero-grid">
           ${renderHeroStat("状态", statusLabel(summary.status))}
-          ${renderHeroStat("会话", String(summary.sessionsActive))}
+          ${renderHeroStat("活跃会话", String(summary.sessionsActive))}
           ${renderHeroStat("队列", String(summary.queueDepth))}
           ${renderHeroStat("负载", String(summary.taskLoad))}
         </div>
       </section>
-      <section class="panel-grid">
+      <section class="grid-two">
         <article class="panel">
           <div class="eyebrow">接线状态</div>
           <h2>本机连接</h2>
@@ -73,7 +92,7 @@ export function renderEdgePage(summary: InstanceSummary): string {
         </article>
         <article class="panel">
           <div class="eyebrow">只读接口</div>
-          <h2>API</h2>
+          <h2>Edge API</h2>
           <ul class="detail-list">
             <li><code>/healthz</code></li>
             <li><code>/api/instance-summary</code></li>
@@ -88,75 +107,162 @@ export function renderEdgePage(summary: InstanceSummary): string {
 }
 
 function renderSection(input: MasterRenderInput): string {
+  if (input.section === "usage") return renderUsageSection(input);
   if (input.section === "machines") return renderMachinesSection(input.summary.nodes);
-  if (input.section === "staff") return renderStaffSection(input.staffViews);
-  if (input.section === "tasks") return renderTasksSection(input.workItems, input.summary.nodes);
+  if (input.section === "staff") return renderStaffSection(input);
+  if (input.section === "memory") return renderWorkbenchSection("memory", input);
+  if (input.section === "docs") return renderWorkbenchSection("docs", input);
+  if (input.section === "tasks") return renderTasksSection(input);
   if (input.section === "settings") return renderSettingsSection(input);
   return renderOverviewSection(input);
 }
 
 function renderOverviewSection(input: MasterRenderInput): string {
-  const urgent = input.workItems.filter((item) => item.priority === "p0" || item.status === "blocked").slice(0, 4);
+  const urgent = input.workItems.filter((item) => item.priority === "p0" || item.status === "blocked").slice(0, 5);
+  const activeStaff = input.staffViews.filter((item) => item.state === "busy_running" || item.state === "blocked_waiting").slice(0, 5);
   const riskyNodes = input.summary.nodes.filter((node) => node.status !== "online").slice(0, 4);
-  const activeStaff = input.staffViews.filter((item) => item.state === "busy_running").slice(0, 4);
+  const currentTasks = input.workItems.filter((item) => item.status === "running" || item.status === "review" || item.status === "blocked").slice(0, 6);
+
   return `
-    <section class="grid-three">
-      <article class="panel">
-        <div class="eyebrow">高优先级任务</div>
+    <section class="grid-two">
+      <article class="panel panel-large">
+        <div class="eyebrow">全局态势</div>
         <h2>待总办处理</h2>
         ${urgent.length > 0 ? `<div class="stack-list">${urgent.map(renderUrgentItem).join("")}</div>` : `<div class="empty-copy">当前没有 P0 或阻塞任务。</div>`}
       </article>
+      <article class="panel panel-large">
+        <div class="eyebrow">控制脉冲</div>
+        <h2>当前任务</h2>
+        ${currentTasks.length > 0 ? `<div class="stack-list">${currentTasks.map((item) => renderTaskPulse(item, input.summary.nodes)).join("")}</div>` : `<div class="empty-copy">当前没有进行中的任务。</div>`}
+      </article>
+    </section>
+    <section class="grid-three">
       <article class="panel">
         <div class="eyebrow">风险节点</div>
         <h2>需要干预</h2>
-        ${riskyNodes.length > 0 ? `<div class="stack-list">${riskyNodes.map(renderRiskNode).join("")}</div>` : `<div class="empty-copy">所有节点当前都在线稳定。</div>`}
+        ${riskyNodes.length > 0 ? `<div class="stack-list">${riskyNodes.map(renderRiskNode).join("")}</div>` : `<div class="empty-copy">所有节点当前在线稳定。</div>`}
       </article>
       <article class="panel">
         <div class="eyebrow">活跃部门</div>
         <h2>正在推进</h2>
-        ${activeStaff.length > 0 ? `<div class="stack-list">${activeStaff.map(renderStaffPulse).join("")}</div>` : `<div class="empty-copy">当前没有高活动节点。</div>`}
+        ${activeStaff.length > 0 ? `<div class="stack-list">${activeStaff.map(renderStaffPulse).join("")}</div>` : `<div class="empty-copy">当前没有需要特别关注的人员负载。</div>`}
+      </article>
+      <article class="panel">
+        <div class="eyebrow">用量脉搏</div>
+        <h2>今日摘要</h2>
+        <ul class="detail-list">
+          <li>运行时：${escapeHtml(input.insights.usage.currentStatus)}</li>
+          <li>模型：${escapeHtml(input.insights.usage.providerLabel)}</li>
+          <li>订阅：${escapeHtml(input.insights.usage.windowLabel)}</li>
+          <li>今日估算：${formatUsageCost(input.insights.usage.todayCost, input.insights.usage.todayTokens)}</li>
+        </ul>
       </article>
     </section>
-    <section class="section-head"><h2>五节点态势</h2></section>
+    <section class="section-head">
+      <h2>五节点态势</h2>
+      <div class="section-copy">总办主脑与四个部门节点的在线、连接、任务负载一眼看清。</div>
+    </section>
     <section class="card-grid">
       ${input.summary.nodes.map(renderMachineCard).join("")}
-    </section>`;
+    </section>
+  `;
+}
+
+function renderUsageSection(input: MasterRenderInput): string {
+  const usage = input.insights.usage;
+  return `
+    <section class="grid-three">
+      <article class="panel">
+        <div class="eyebrow">当前状态</div>
+        <h2>运行时</h2>
+        <div class="metric-wall">
+          <div><span>Runtime</span><strong>${usage.runtimeConnected ? "已接通" : "未接通"}</strong></div>
+          <div><span>Codex</span><strong>${usage.codexConnected ? "已接通" : "未接通"}</strong></div>
+          <div><span>订阅</span><strong>${usage.subscriptionConnected ? "已接通" : "未接通"}</strong></div>
+        </div>
+      </article>
+      <article class="panel">
+        <div class="eyebrow">用量与订阅摘要</div>
+        <h2>今日 AI 用量</h2>
+        <div class="metric-wall">
+          <div><span>模型</span><strong>${escapeHtml(usage.providerLabel)}</strong></div>
+          <div><span>Token</span><strong>${usage.todayTokens ? formatInt(usage.todayTokens) : "未连接"}</strong></div>
+          <div><span>费用</span><strong>${usage.todayCost !== undefined ? `$${usage.todayCost.toFixed(2)}` : "未连接"}</strong></div>
+        </div>
+      </article>
+      <article class="panel">
+        <div class="eyebrow">订阅窗口</div>
+        <h2>${escapeHtml(usage.planLabel ?? "等待接线")}</h2>
+        <div class="copy-box">${escapeHtml(usage.windowLabel)}</div>
+        <div class="meta">剩余空间：${usage.remainingBudgetPercent !== undefined ? `${usage.remainingBudgetPercent}%` : "未连接"}</div>
+      </article>
+    </section>
+    <section class="section-head"><h2>接线建议</h2><div class="section-copy">不伪造账单数据，缺什么就明确显示什么。</div></section>
+    <section class="grid-two">
+      <article class="panel panel-large">
+        <div class="eyebrow">缺口说明</div>
+        <h2>当前还差哪些来源</h2>
+        ${usage.notes.length > 0 ? `<ul class="detail-list">${usage.notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<div class="empty-copy">当前用量与订阅链路都已接通。</div>`}
+      </article>
+      <article class="panel panel-large">
+        <div class="eyebrow">补线入口</div>
+        <h2>建议先补</h2>
+        <ul class="detail-list">
+          <li>在设置页确认 <code>OPENCLAW_HOME</code>、<code>CODEX_HOME</code>、<code>OPENCLAW_SUBSCRIPTION_SNAPSHOT_PATH</code>。</li>
+          <li>优先保证 OpenClaw runtime 与 Gateway 可读，再补 Codex 和账单快照。</li>
+          <li>订阅未接通时不要伪造剩余额度，只显示未连接。</li>
+        </ul>
+      </article>
+    </section>
+  `;
 }
 
 function renderMachinesSection(nodes: InstanceSummary[]): string {
   return `
-    <section class="section-head"><h2>机器页</h2><div class="section-copy">4 台 Edge + 1 台 Master 的在线、负载、会话与告警状态。</div></section>
+    <section class="section-head"><h2>机器页</h2><div class="section-copy">查看每台机器的连接、会话、负载、心跳和告警。</div></section>
     <section class="card-grid">
       ${nodes.map(renderMachineCard).join("")}
-    </section>`;
+    </section>
+  `;
 }
 
-function renderStaffSection(staffViews: StaffView[]): string {
-  const byDepartment = new Map<string, StaffView[]>();
-  for (const item of staffViews) {
-    const current = byDepartment.get(item.department) ?? [];
-    current.push(item);
-    byDepartment.set(item.department, current);
-  }
-
+function renderStaffSection(input: MasterRenderInput): string {
+  const selected = input.staffViews.find((item) => item.instanceId === input.selectedStaffId) ?? input.staffViews[0];
   return `
-    <section class="section-head"><h2>员工页</h2><div class="section-copy">按部门和节点查看当前状态、最新任务与阻塞原因。</div></section>
-    ${[...byDepartment.entries()]
-      .map(
-        ([department, items]) => `<section class="department-shell">
-          <div class="department-head">
-            <div class="eyebrow">DEPARTMENT</div>
-            <h2>${escapeHtml(department)}</h2>
-          </div>
-          <div class="card-grid">
-            ${items.map(renderStaffCard).join("")}
-          </div>
-        </section>`,
-      )
-      .join("")}`;
+    <section class="section-head"><h2>员工页</h2><div class="section-copy">点开员工可以看到他现在正在做什么、下一步是什么、卡在哪里。</div></section>
+    <section class="grid-two">
+      <div class="panel panel-large">
+        <div class="stack-list">
+          ${input.staffViews.map((item) => renderStaffListCard(item, item.instanceId === selected?.instanceId)).join("")}
+        </div>
+      </div>
+      <div class="panel panel-large">
+        ${selected ? renderStaffDetail(selected) : `<div class="empty-copy">当前没有可展示的员工节点。</div>`}
+      </div>
+    </section>
+  `;
 }
 
-function renderTasksSection(workItems: WorkItem[], nodes: InstanceSummary[]): string {
+function renderWorkbenchSection(kind: "memory" | "docs", input: MasterRenderInput): string {
+  const snapshot = kind === "memory" ? input.insights.memory : input.insights.docs;
+  const label = kind === "memory" ? "记忆" : "文档";
+  return `
+    <section class="section-head">
+      <h2>${label}工作台</h2>
+      <div class="section-copy">${kind === "memory" ? "直接查看和编辑真实记忆文件与快照。" : "只保留最关键的共享文档与核心工作文档。"} </div>
+    </section>
+    <section class="grid-two workbench-grid">
+      <div class="panel panel-large">
+        ${renderWorkbenchList(snapshot, input.section, input.selectedFile)}
+      </div>
+      <div class="panel panel-large">
+        ${renderWorkbenchEditor(kind, input)}
+      </div>
+    </section>
+  `;
+}
+
+function renderTasksSection(input: MasterRenderInput): string {
   const columns: Array<{ stage: WorkItem["stage"]; label: string }> = [
     { stage: "dispatch", label: "派单" },
     { stage: "execution", label: "执行" },
@@ -165,74 +271,128 @@ function renderTasksSection(workItems: WorkItem[], nodes: InstanceSummary[]): st
   ];
 
   return `
-    <section class="section-head"><h2>任务页</h2><div class="section-copy">以派单 → 执行 → 交付 → 验收的链路查看当前推进状态。</div></section>
+    <section class="section-head"><h2>任务页</h2><div class="section-copy">官库缺失的控制能力这里先补上，支持总办直接停止任务并查看责任节点。</div></section>
     <section class="task-board">
       ${columns
         .map(({ stage, label }) => {
-          const items = workItems.filter((item) => item.stage === stage);
+          const items = input.workItems.filter((item) => item.stage === stage);
           return `<article class="task-column">
             <header class="task-column-head">
               <h3>${label}</h3>
               <span>${items.length}</span>
             </header>
             <div class="task-column-body">
-              ${items.length > 0 ? items.map((item) => renderTaskCard(item, nodes)).join("") : `<div class="empty-copy">当前没有任务。</div>`}
+              ${items.length > 0 ? items.map((item) => renderTaskCard(item, input.summary.nodes, input.config)).join("") : `<div class="empty-copy">当前没有任务。</div>`}
             </div>
           </article>`;
         })
         .join("")}
-    </section>`;
+    </section>
+  `;
 }
 
 function renderSettingsSection(input: MasterRenderInput): string {
   return `
     <section class="grid-two">
-      <article class="panel">
+      <article class="panel panel-large">
         <div class="eyebrow">接线状态</div>
         <h2>当前配置</h2>
         <ul class="detail-list">
           <li>角色：${input.config.role}</li>
           <li>实例 ID：${escapeHtml(input.config.instanceId)}</li>
           <li>本机地址：${escapeHtml(input.config.baseUrl)}</li>
-          <li>实例清单：${escapeHtml(input.config.instancesPath)}</li>
-          <li>任务清单：${escapeHtml(input.config.workItemsPath)}</li>
-          <li>令牌保护：${input.config.localTokenAuthRequired ? "开启" : "关闭"}</li>
+          <li>OpenClaw Home：${escapeHtml(input.config.openclawHome ?? "未设置")}</li>
+          <li>Codex Home：${escapeHtml(input.config.codexHome ?? "未设置")}</li>
+          <li>订阅快照：${escapeHtml(input.config.subscriptionSnapshotPath ?? "未设置")}</li>
+          <li>任务控制：${input.config.taskControlEnabled ? "已开启" : "未开启"}</li>
+          <li>文档写回：${input.config.fileEditEnabled ? "已开启" : "未开启"}</li>
         </ul>
       </article>
-      <article class="panel">
+      <article class="panel panel-large">
+        <div class="eyebrow">操作令牌</div>
+        <h2>浏览器本地 Token</h2>
+        <div class="copy-box">写操作需要本地 token。令牌只保存在当前浏览器的 localStorage，不回显到页面。</div>
+        <label class="token-field">
+          <span>输入本地 token</span>
+          <input type="password" placeholder="粘贴 x-local-token / Bearer token" data-token-input />
+        </label>
+        <button class="action-btn" type="button" data-save-token>保存到浏览器</button>
+        <div class="meta">保存后，停止任务和文档写回按钮会带上本地 token 请求 API。</div>
+      </article>
+    </section>
+    <section class="grid-two">
+      <article class="panel panel-large">
         <div class="eyebrow">部署建议</div>
         <h2>Master 原则</h2>
         <ul class="detail-list">
-          <li>Master 只聚合摘要，不跨机器挂载远端目录。</li>
-          <li>Edge 仅向 Master 暴露只读摘要接口。</li>
-          <li>真实部署建议走内网、VPN 或 Tailscale。</li>
-          <li>高风险写接口保持关闭。</li>
+          <li>Master 只聚合摘要，不跨机器直接挂载远端目录。</li>
+          <li>每台 Edge 只暴露只读摘要接口，写操作由总办侧控制。</li>
+          <li>HTTPS 证书必须建立在域名已经解析到主控机或反向代理之上。</li>
         </ul>
       </article>
+      <article class="panel panel-large">
+        <div class="eyebrow">实例注册</div>
+        <h2>五节点清单</h2>
+        <div class="stack-list">
+          ${input.instances.map(renderInstanceCard).join("")}
+        </div>
+      </article>
     </section>
-    <section class="section-head"><h2>实例注册</h2></section>
-    <section class="card-grid">
-      ${input.instances.length > 0 ? input.instances.map(renderInstanceCard).join("") : `<article class="panel"><div class="empty-copy">还没有加载到 runtime/instances.json，当前仅显示本机 Master。</div></article>`}
-    </section>`;
+  `;
 }
 
-function renderMasterHero(input: MasterRenderInput): string {
-  const badgeCounts = [
-    renderHeroStat("节点", String(input.summary.totals.total)),
-    renderHeroStat("在线", String(input.summary.totals.online)),
-    renderHeroStat("告警", String(input.summary.totals.alerts)),
-    renderHeroStat("任务压力", String(input.summary.totals.taskLoad)),
-  ].join("");
-
+function renderHero(input: MasterRenderInput): string {
   return `
     <section class="hero">
       <div>
-        <div class="brand-chip">MASTER CONTROL</div>
+        <div class="brand-chip">CONTROL ROOM</div>
         <h1>${sectionLabel(input.section)}</h1>
         <p>${sectionLead(input.section)}</p>
       </div>
-      <div class="hero-grid">${badgeCounts}</div>
-    </section>`;
+      <div class="hero-grid">
+        ${renderHeroStat("节点", String(input.summary.totals.total))}
+        ${renderHeroStat("在线", String(input.summary.totals.online))}
+        ${renderHeroStat("会话", String(input.summary.totals.sessionsActive))}
+        ${renderHeroStat("告警", String(input.summary.totals.alerts))}
+      </div>
+    </section>
+  `;
+}
+
+function renderStatusRail(input: MasterRenderInput): string {
+  const usage = input.insights.usage;
+  const activeAgents = input.insights.agents.slice(0, 6);
+  const scheduleItems = input.insights.schedules.items.slice(0, 5);
+  return `
+    <section class="rail-panel">
+      <div class="eyebrow">当前状态</div>
+      <h2>主脑脉冲</h2>
+      <div class="metric-wall">
+        <div><span>Master</span><strong>${statusLabel(input.summary.master.status)}</strong></div>
+        <div><span>队列</span><strong>${input.summary.totals.queueDepth}</strong></div>
+        <div><span>负载</span><strong>${input.summary.totals.taskLoad}</strong></div>
+      </div>
+      <div class="meta">最近心跳：${escapeHtml(input.summary.master.lastHeartbeatAt)}</div>
+    </section>
+    <section class="rail-panel">
+      <div class="eyebrow">用量与订阅摘要</div>
+      <h2>${escapeHtml(usage.currentStatus)}</h2>
+      <div class="meta">今日 AI 用量：${formatUsageCost(usage.todayCost, usage.todayTokens)}</div>
+      <div class="meta">模型：${escapeHtml(usage.providerLabel)}</div>
+      <div class="meta">订阅：${escapeHtml(usage.windowLabel)}</div>
+    </section>
+    <section class="rail-panel">
+      <div class="eyebrow">当前活跃智能体</div>
+      <h2>智能体与会话</h2>
+      <ul class="story-list">${activeAgents.length > 0 ? activeAgents.map(renderAgentStory).join("") : `<li>暂无活跃智能体信号。</li>`}</ul>
+    </section>
+    <section class="rail-panel">
+      <div class="eyebrow">定时与心跳</div>
+      <h2>定时任务</h2>
+      <div class="meta">Heartbeat ${input.insights.schedules.heartbeatEnabled ? "已开启" : "未开启"} · 下次 ${escapeHtml(input.insights.schedules.nextRunAt ?? "待计算")}</div>
+      <ul class="story-list">${scheduleItems.length > 0 ? scheduleItems.map(renderScheduleStory).join("") : `<li>暂无定时任务。</li>`}</ul>
+    </section>
+  `;
 }
 
 function renderMachineCard(node: InstanceSummary): string {
@@ -252,30 +412,101 @@ function renderMachineCard(node: InstanceSummary): string {
     <div class="meta">${escapeHtml(node.region)} · ${escapeHtml(node.machineIp)}</div>
     <div class="meta">Gateway ${node.connections.gatewayReachable ? "online" : "down"} · OpenClaw ${node.connections.openclawReachable ? "online" : "down"}</div>
     ${node.alerts.length > 0 ? `<ul class="alerts">${node.alerts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<div class="meta">当前无显式告警。</div>`}
+    <div class="meta"><a href="${escapeHtml(node.baseUrl)}" target="_blank" rel="noreferrer">打开节点面板</a></div>
   </article>`;
 }
 
-function renderStaffCard(item: StaffView): string {
-  return `<article class="panel staff-card state-${escapeHtml(item.state)}">
-    <div class="machine-head">
-      <div>
-        <div class="eyebrow">${escapeHtml(item.department)} / ${escapeHtml(item.region)}</div>
-        <h3>${escapeHtml(item.nodeName)}</h3>
-      </div>
-      <span class="badge badge-${escapeHtml(mapStaffStateBadge(item.state))}">${staffStateLabel(item.state)}</span>
+function renderStaffListCard(item: StaffView, selected: boolean): string {
+  return `<a class="staff-list-card${selected ? " active" : ""}" href="/staff?node=${encodeURIComponent(item.instanceId)}">
+    <div>
+      <div class="eyebrow">${escapeHtml(item.department)}</div>
+      <strong>${escapeHtml(item.nodeName)}</strong>
     </div>
-    <div class="meta">当前任务：${escapeHtml(item.currentTask ?? "待命中")}</div>
+    <div class="staff-list-copy">
+      <span>${staffStateLabel(item.state)}</span>
+      <small>${escapeHtml(item.currentTask ?? item.nextTask?.title ?? "待命中")}</small>
+    </div>
+  </a>`;
+}
+
+function renderStaffDetail(item: StaffView): string {
+  return `
+    <div class="eyebrow">员工详情</div>
+    <h2>${escapeHtml(item.nodeName)}</h2>
     <div class="copy-box">${escapeHtml(item.recentOutput)}</div>
     <ul class="detail-list">
+      <li>当前状态：${staffStateLabel(item.state)}</li>
+      <li>当前任务：${escapeHtml(item.currentTask ?? "待命中")}</li>
+      <li>下一步：${escapeHtml(item.nextTask?.title ?? "暂无")}</li>
       <li>阻塞：${escapeHtml(item.blocker ?? "无")}</li>
       <li>预计交付：${escapeHtml(item.expectedDelivery ?? "待定")}</li>
       <li>最近验收：${escapeHtml(item.acceptanceNote ?? "暂无")}</li>
     </ul>
-  </article>`;
+    <div class="section-head compact"><h2>正在做的事</h2></div>
+    ${item.activeTasks.length > 0 ? `<div class="stack-list">${item.activeTasks.map(renderStaffTaskSummary).join("")}</div>` : `<div class="empty-copy">当前没有运行中的任务。</div>`}
+  `;
 }
 
-function renderTaskCard(item: WorkItem, nodes: InstanceSummary[]): string {
+function renderStaffTaskSummary(task: StaffTaskSummary): string {
+  return `<div class="stack-item">
+    <strong>${escapeHtml(task.title)}</strong>
+    <span>${taskStatusLabel(task.status)} · ${stageLabel(task.stage)} · ${escapeHtml(task.priority.toUpperCase())}</span>
+    <small>${escapeHtml(task.latestAction)}</small>
+  </div>`;
+}
+
+function renderWorkbenchList(snapshot: WorkbenchSnapshot, section: MasterSection, selectedFile?: WorkbenchFileDetail): string {
+  return `
+    <div class="eyebrow">${section === "memory" ? "记忆状态" : "文档状态"}</div>
+    <h2>${snapshot.connected ? "已连接" : "未连接"}</h2>
+    ${snapshot.note ? `<div class="copy-box">${escapeHtml(snapshot.note)}</div>` : ""}
+    <div class="facet-row">${snapshot.facets.map((item) => `<span class="facet-pill">${escapeHtml(item.label)} ${item.count}</span>`).join("")}</div>
+    ${
+      snapshot.files.length > 0
+        ? `<div class="stack-list">${snapshot.files
+            .map((item) => renderWorkbenchFileLink(section, item.relativePath, item.title, item.category, selectedFile?.entry.relativePath === item.relativePath))
+            .join("")}</div>`
+        : `<div class="empty-copy">当前没有发现可展示的文件。</div>`
+    }
+  `;
+}
+
+function renderWorkbenchFileLink(
+  section: MasterSection,
+  relativePath: string,
+  title: string,
+  category: string,
+  selected: boolean,
+): string {
+  return `<a class="workbench-link${selected ? " active" : ""}" href="/${section}?file=${encodeURIComponent(relativePath)}">
+    <strong>${escapeHtml(title)}</strong>
+    <span>${escapeHtml(category)}</span>
+  </a>`;
+}
+
+function renderWorkbenchEditor(kind: "memory" | "docs", input: MasterRenderInput): string {
+  const detail = input.selectedFile;
+  if (!detail) {
+    return `<div class="eyebrow">${kind === "memory" ? "记忆文件工作台" : "文档工作台"}</div><h2>选择文件</h2><div class="empty-copy">从左侧文件列表中选择一个文件查看内容。</div>`;
+  }
+
+  return `
+    <div class="eyebrow">${kind === "memory" ? "记忆文件工作台" : "文档工作台"}</div>
+    <h2>${escapeHtml(detail.entry.title)}</h2>
+    <div class="meta">${escapeHtml(detail.entry.relativePath)} · ${escapeHtml(detail.entry.updatedAt ?? "未知时间")}</div>
+    <textarea class="editor" data-workbench-editor>${escapeHtml(detail.content)}</textarea>
+    <div class="editor-actions">
+      <button class="action-btn" type="button" data-save-file data-kind="${kind}" data-file="${escapeHtml(detail.entry.relativePath)}"${!input.config.fileEditEnabled || !detail.entry.editable ? " disabled" : ""}>保存写回</button>
+      <span class="meta">${input.config.fileEditEnabled && detail.entry.editable ? "保存会直接写回 OpenClaw 实际文件。" : "当前文件不可写或已关闭写回能力。"}</span>
+    </div>
+  `;
+}
+
+function renderTaskCard(item: WorkItem, nodes: InstanceSummary[], config: AppConfig): string {
   const owner = nodes.find((node) => node.instanceId === item.ownerInstanceId);
+  const crew = item.crew?.length ? item.crew.join(", ") : "未指定智能体";
+  const canStop = config.taskControlEnabled && item.status !== "done";
+
   return `<article class="task-card task-${escapeHtml(item.status)}">
     <div class="task-top">
       <span class="badge badge-${escapeHtml(mapTaskStatusBadge(item.status))}">${taskStatusLabel(item.status)}</span>
@@ -286,29 +517,39 @@ function renderTaskCard(item: WorkItem, nodes: InstanceSummary[]): string {
     <p>${escapeHtml(item.summary)}</p>
     <div class="copy-box">${escapeHtml(item.latestAction)}</div>
     <ul class="detail-list">
+      <li>智能体：${escapeHtml(crew)}</li>
       <li>阻塞：${escapeHtml(item.blockers[0] ?? "无")}</li>
       <li>截止：${escapeHtml(item.dueAt ?? "待定")}</li>
       <li>验收：${escapeHtml(item.acceptanceNote ?? "暂无")}</li>
     </ul>
+    <div class="task-actions">
+      <button class="action-btn action-danger" type="button" data-stop-work-id="${escapeHtml(item.workId)}"${canStop ? "" : " disabled"}>停止任务</button>
+      ${item.stoppedAt ? `<span class="meta">已于 ${escapeHtml(item.stoppedAt)} 停止</span>` : ""}
+    </div>
   </article>`;
 }
 
 function renderInstanceCard(instance: InstanceConfig): string {
-  return `<article class="panel">
-    <div class="machine-head">
-      <div>
-        <div class="eyebrow">${escapeHtml(instance.department)} / ${escapeHtml(instance.role.toUpperCase())}</div>
-        <h3>${escapeHtml(instance.instanceName)}</h3>
-      </div>
-      <span class="badge badge-${instance.enabled ? "online" : "offline"}">${instance.enabled ? "ENABLED" : "DISABLED"}</span>
-    </div>
-    <ul class="detail-list">
-      <li>地址：${escapeHtml(instance.baseUrl)}</li>
-      <li>摘要：${escapeHtml(instance.summaryUrl ?? `${instance.baseUrl}/api/instance-summary`)}</li>
-      <li>区域：${escapeHtml(instance.region)}</li>
-      <li>机器：${escapeHtml(instance.machineIp)}</li>
-    </ul>
-  </article>`;
+  return `<div class="stack-item">
+    <strong>${escapeHtml(instance.instanceName)}</strong>
+    <span>${escapeHtml(instance.department)} · ${escapeHtml(instance.baseUrl)}</span>
+  </div>`;
+}
+
+function renderAgentStory(item: DashboardInsights["agents"][number]): string {
+  return `<li>
+    <strong>${escapeHtml(item.label)}</strong>
+    <span>${item.status === "active" ? "活跃" : item.status === "warning" ? "告警" : "待命"} · 会话 ${item.activeSessions} · 任务 ${item.activeTasks}</span>
+    <small>${escapeHtml(item.currentTask ?? item.notes[0] ?? "当前无活跃任务")}</small>
+  </li>`;
+}
+
+function renderScheduleStory(item: DashboardInsights["schedules"]["items"][number]): string {
+  return `<li>
+    <strong>${escapeHtml(item.name)}</strong>
+    <span>${item.kind === "heartbeat" ? "心跳" : "Cron"} · ${item.enabled ? "启用" : "关闭"} · ${escapeHtml(item.nextRunAt ?? "暂无下次时间")}</span>
+    <small>${escapeHtml(item.error ?? item.lastStatus ?? "暂无执行结果")}</small>
+  </li>`;
 }
 
 function renderNavLink(section: MasterSection, current: MasterSection): string {
@@ -322,6 +563,7 @@ function renderUrgentItem(item: WorkItem): string {
   return `<div class="stack-item">
     <strong>${escapeHtml(item.title)}</strong>
     <span>${escapeHtml(item.department)} · ${taskStatusLabel(item.status)} · ${escapeHtml(item.priority.toUpperCase())}</span>
+    <small>${escapeHtml(item.latestAction)}</small>
   </div>`;
 }
 
@@ -332,15 +574,91 @@ function renderRiskNode(node: InstanceSummary): string {
   </div>`;
 }
 
+function renderTaskPulse(item: WorkItem, nodes: InstanceSummary[]): string {
+  const owner = nodes.find((node) => node.instanceId === item.ownerInstanceId);
+  return `<div class="stack-item">
+    <strong>${escapeHtml(item.title)}</strong>
+    <span>${escapeHtml(owner?.instanceName ?? item.ownerInstanceId)} · ${taskStatusLabel(item.status)}</span>
+    <small>${escapeHtml(item.latestAction)}</small>
+  </div>`;
+}
+
 function renderStaffPulse(item: StaffView): string {
   return `<div class="stack-item">
     <strong>${escapeHtml(item.nodeName)}</strong>
-    <span>${staffStateLabel(item.state)} · ${escapeHtml(item.currentTask ?? "待命")}</span>
+    <span>${staffStateLabel(item.state)} · ${escapeHtml(item.currentTask ?? item.nextTask?.title ?? "待命")}</span>
   </div>`;
 }
 
 function renderHeroStat(label: string, value: string): string {
   return `<div class="hero-stat"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function renderAppScript(config: AppConfig): string {
+  return `<script>
+    (() => {
+      const storageKey = "oldfish.localToken";
+      const tokenInput = document.querySelector("[data-token-input]");
+      if (tokenInput) tokenInput.value = window.localStorage.getItem(storageKey) || "";
+
+      document.querySelector("[data-save-token]")?.addEventListener("click", () => {
+        const value = tokenInput?.value?.trim() || "";
+        window.localStorage.setItem(storageKey, value);
+        window.alert(value ? "本地 token 已保存到浏览器。" : "本地 token 已清空。");
+      });
+
+      const getToken = () => window.localStorage.getItem(storageKey) || "";
+      const headers = () => {
+        const token = getToken();
+        return {
+          "content-type": "application/json",
+          ...(token ? { "x-local-token": token } : {}),
+        };
+      };
+
+      document.querySelectorAll("[data-stop-work-id]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const workId = button.getAttribute("data-stop-work-id");
+          if (!workId) return;
+          if (!window.confirm("确认停止这个任务？")) return;
+          const response = await fetch("/api/work-items/stop", {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ workId }),
+          });
+          if (!response.ok) {
+            const text = await response.text();
+            window.alert("停止任务失败：" + text);
+            return;
+          }
+          window.location.href = "/tasks?notice=task-stopped";
+        });
+      });
+
+      document.querySelector("[data-save-file]")?.addEventListener("click", async (event) => {
+        const target = event.currentTarget;
+        const file = target.getAttribute("data-file");
+        const kind = target.getAttribute("data-kind");
+        const editor = document.querySelector("[data-workbench-editor]");
+        if (!file || !kind || !editor) return;
+        const response = await fetch("/api/workbench-file", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            kind,
+            file,
+            content: editor.value,
+          }),
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          window.alert("保存失败：" + text);
+          return;
+        }
+        window.location.href = "/" + kind + "?file=" + encodeURIComponent(file) + "&notice=file-saved";
+      });
+    })();
+  </script>`;
 }
 
 function renderLayout(title: string, body: string): string {
@@ -352,195 +670,198 @@ function renderLayout(title: string, body: string): string {
       <title>${escapeHtml(title)}</title>
       <style>
         :root {
-          --bg: #06080d;
-          --panel: rgba(10, 15, 24, 0.95);
-          --panel-alt: rgba(6, 12, 20, 0.92);
-          --line: rgba(74, 99, 131, 0.34);
-          --text: #ecf2fb;
-          --muted: #92a2b8;
-          --green: #6aff9b;
-          --cyan: #4df7ff;
-          --orange: #ffb347;
-          --red: #ff5c7a;
-          --shadow: 0 28px 60px rgba(0, 0, 0, 0.42);
+          --bg: #071013;
+          --bg-soft: #0d171b;
+          --panel: rgba(8, 20, 24, 0.92);
+          --panel-strong: rgba(11, 27, 31, 0.96);
+          --panel-border: rgba(77, 154, 184, 0.18);
+          --text: #f1f7f7;
+          --muted: #8ca6ad;
+          --accent: #79f0ff;
+          --accent-warm: #ffa758;
+          --danger: #ff5b6e;
+          --ok: #56f39a;
+          --warn: #ffd05c;
+          --shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
+          --radius: 24px;
+          --mono: "IBM Plex Mono", "SFMono-Regular", "Menlo", monospace;
+          --sans: "Space Grotesk", "Noto Sans SC", system-ui, sans-serif;
         }
+
         * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; min-height: 100%; }
         body {
-          margin: 0;
-          color: var(--text);
-          font: 14px/1.6 "SF Pro Display", "JetBrains Mono", "PingFang SC", sans-serif;
           background:
-            radial-gradient(circle at 12% 0%, rgba(77,247,255,.14), transparent 24%),
-            radial-gradient(circle at 100% 0%, rgba(106,255,155,.08), transparent 22%),
-            linear-gradient(180deg, #03050a 0%, #070b12 100%);
-          min-height: 100vh;
+            radial-gradient(circle at top left, rgba(77, 154, 184, 0.18), transparent 28%),
+            radial-gradient(circle at top right, rgba(255, 167, 88, 0.12), transparent 24%),
+            linear-gradient(145deg, #04080a, #081317 42%, #09151a 100%);
+          color: var(--text);
+          font-family: var(--sans);
         }
-        body::before {
-          content: "";
-          position: fixed;
-          inset: 0;
-          background-image:
-            linear-gradient(rgba(77,247,255,.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(77,247,255,.04) 1px, transparent 1px);
-          background-size: 34px 34px;
-          pointer-events: none;
-          opacity: 0.18;
-        }
+
         a { color: inherit; text-decoration: none; }
-        code {
-          padding: 2px 6px;
-          border-radius: 6px;
-          background: rgba(77,247,255,.12);
-          color: var(--cyan);
-        }
-        .shell {
-          position: relative;
-          max-width: 1680px;
-          margin: 0 auto;
-          padding: 24px;
-          display: grid;
-          grid-template-columns: 310px minmax(0, 1fr);
-          gap: 20px;
-        }
-        .edge-shell {
-          position: relative;
-          max-width: 1480px;
-          margin: 0 auto;
-          padding: 24px;
-        }
-        .sidebar {
-          position: sticky;
-          top: 24px;
-          align-self: start;
+        code { font-family: var(--mono); }
+        button, input, textarea { font: inherit; }
+
+        .app-shell, .edge-shell {
+          width: min(1680px, calc(100vw - 32px));
+          margin: 16px auto;
           display: grid;
           gap: 16px;
         }
-        .brand-card, .side-panel, .panel, .hero, .task-column {
-          background: linear-gradient(180deg, rgba(10,15,24,0.98), rgba(8,12,20,0.94));
-          border: 1px solid var(--line);
-          border-radius: 24px;
+
+        .app-shell { grid-template-columns: 280px minmax(0, 1fr) 340px; align-items: start; }
+        .edge-shell { grid-template-columns: 1fr; }
+
+        .sidebar, .rail, .main-column, .panel, .rail-panel, .brand-panel, .hero, .notice-banner {
+          border: 1px solid var(--panel-border);
+          background: linear-gradient(180deg, rgba(12, 24, 28, 0.95), rgba(7, 16, 19, 0.95));
           box-shadow: var(--shadow);
+          backdrop-filter: blur(18px);
         }
-        .brand-card, .side-panel, .panel, .task-column { padding: 20px; }
-        .brand-card h1, .hero h1 { margin: 8px 0 0; letter-spacing: -0.04em; }
-        .brand-card h1 { font-size: 38px; }
-        .brand-card p, .hero p, .section-copy, .brand-meta, .meta, .stack-item span, .nav-link small, .empty-copy {
-          color: var(--muted);
-        }
-        .nav-list { display: grid; gap: 10px; }
-        .nav-link {
-          display: block;
-          border: 1px solid rgba(77,247,255,.12);
-          background: rgba(6,10,16,.78);
-          border-radius: 18px;
-          padding: 12px 14px;
-          transition: transform .18s ease, border-color .18s ease;
-        }
-        .nav-link:hover { transform: translateY(-1px); border-color: rgba(77,247,255,.28); }
-        .nav-link.active {
-          border-color: rgba(77,247,255,.45);
-          background: linear-gradient(180deg, rgba(10,20,31,.96), rgba(9,17,26,.92));
-        }
-        .nav-link span { display: block; font-size: 16px; font-weight: 700; }
-        .nav-link small { display: block; margin-top: 4px; }
-        .side-kpi { font-size: 30px; font-weight: 800; letter-spacing: -0.04em; margin-top: 6px; }
-        .content { display: grid; gap: 20px; }
-        .brand-chip, .eyebrow {
+
+        .sidebar, .rail { position: sticky; top: 16px; border-radius: var(--radius); padding: 18px; }
+        .main-column { border-radius: var(--radius); padding: 18px; }
+        .notice-banner { border-radius: 18px; padding: 12px 16px; margin-bottom: 14px; color: var(--accent); }
+        .brand-panel { border-radius: 22px; padding: 18px; margin-bottom: 14px; }
+        .brand-panel h1, .hero h1 { margin: 6px 0 10px; font-size: clamp(28px, 4vw, 42px); letter-spacing: 0.06em; }
+        .brand-panel p, .hero p, .section-copy, .copy-box, .meta, .empty-copy { color: var(--muted); line-height: 1.7; }
+        .brand-meta, .meta, .eyebrow, .nav-link small, .facet-pill, .priority, .story-list small, .stack-item small { font-family: var(--mono); }
+        .eyebrow, .brand-chip {
           display: inline-flex;
-          align-items: center;
+          padding: 6px 10px;
           border-radius: 999px;
-          padding: 4px 10px;
-          border: 1px solid rgba(77,247,255,.22);
-          color: var(--cyan);
-          background: rgba(77,247,255,.08);
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: .18em;
+          background: rgba(121, 240, 255, 0.08);
+          color: var(--accent);
           text-transform: uppercase;
+          letter-spacing: 0.18em;
+          font-size: 11px;
         }
-        .hero {
+
+        .nav-list { display: grid; gap: 8px; }
+        .nav-link {
           display: grid;
-          grid-template-columns: minmax(0, 1.3fr) minmax(360px, 1fr);
-          gap: 20px;
-          padding: 24px;
-        }
-        .hero h1 { font-size: 42px; }
-        .hero-grid, .grid-two, .grid-three, .card-grid, .panel-grid, .metric-row, .task-board {
-          display: grid;
-          gap: 16px;
-        }
-        .hero-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .grid-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        .panel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .card-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-        .task-board { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
-        .hero-stat, .stack-item, .copy-box, .task-card, .metric-row div {
-          background: rgba(5,11,18,.82);
-          border: 1px solid rgba(77,247,255,.13);
+          gap: 6px;
+          padding: 12px 14px;
           border-radius: 18px;
+          border: 1px solid transparent;
+          background: rgba(255, 255, 255, 0.02);
+          transition: 140ms ease;
         }
-        .hero-stat { padding: 16px; }
-        .hero-stat strong { display: block; margin-top: 6px; font-size: 30px; letter-spacing: -0.04em; }
-        .section-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; }
-        .section-head h2, .panel h2, .task-column h3 { margin: 8px 0 0; font-size: 26px; letter-spacing: -0.03em; }
-        .machine-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; margin-bottom: 14px; }
-        .machine-head h3 { margin: 6px 0 0; font-size: 24px; }
-        .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; }
-        .metric-row div { padding: 12px; }
-        .metric-row span, .hero-stat span { color: var(--muted); display: block; }
-        .metric-row strong { display: block; margin-top: 4px; font-size: 24px; letter-spacing: -0.03em; }
+        .nav-link:hover, .nav-link.active {
+          border-color: rgba(121, 240, 255, 0.28);
+          background: rgba(121, 240, 255, 0.08);
+        }
+
+        .hero { border-radius: 28px; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; margin-bottom: 18px; }
+        .hero-grid, .grid-three, .grid-two, .card-grid, .metric-row, .metric-wall, .task-board { display: grid; gap: 16px; }
+        .hero-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; }
+        .hero-stat, .metric-wall > div, .metric-row > div {
+          padding: 14px;
+          border-radius: 18px;
+          border: 1px solid rgba(121, 240, 255, 0.12);
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .hero-stat span, .metric-wall span, .metric-row span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; }
+        .hero-stat strong, .metric-wall strong, .metric-row strong { display: block; margin-top: 8px; font-size: 20px; }
+
+        .grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
+        .grid-two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
+        .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .panel, .rail-panel { border-radius: 24px; padding: 18px; }
+        .panel-large { min-height: 100%; }
+        .section-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin: 18px 0 12px; }
+        .section-head.compact { margin-top: 20px; }
+        .section-head h2, .panel h2, .rail-panel h2, .task-column-head h3 { margin: 0; }
+        .stack-list { display: grid; gap: 12px; }
+        .stack-item, .workbench-link, .staff-list-card {
+          display: grid;
+          gap: 6px;
+          padding: 14px;
+          border-radius: 18px;
+          border: 1px solid rgba(121, 240, 255, 0.1);
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .workbench-link.active, .staff-list-card.active { border-color: rgba(255, 167, 88, 0.34); background: rgba(255, 167, 88, 0.08); }
+        .copy-box {
+          margin: 12px 0;
+          padding: 14px;
+          border-radius: 18px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .detail-list, .alerts, .story-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+        .detail-list li, .alerts li, .story-list li { color: var(--muted); line-height: 1.7; }
+        .facet-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 14px; }
+        .facet-pill { padding: 8px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.04); color: var(--muted); font-size: 12px; }
+
+        .machine-head, .task-top, .task-actions, .editor-actions { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+        .machine-head h3, .task-card h4 { margin: 6px 0 0; }
         .badge {
           display: inline-flex;
           align-items: center;
+          padding: 7px 10px;
           border-radius: 999px;
-          padding: 6px 12px;
           font-size: 12px;
-          font-weight: 800;
+          font-family: var(--mono);
           text-transform: uppercase;
+          letter-spacing: 0.12em;
         }
-        .badge-online { background: var(--green); color: #03150a; }
-        .badge-degraded { background: var(--orange); color: #271400; }
-        .badge-offline { background: var(--red); color: #280710; }
-        .badge-unknown { background: var(--cyan); color: #00181d; }
-        .stack-list { display: grid; gap: 12px; margin-top: 14px; }
-        .stack-item { padding: 14px; }
-        .stack-item strong { display: block; margin-bottom: 4px; }
-        .alerts, .detail-list { margin: 12px 0 0; padding-left: 18px; }
-        .alerts li { color: #ffc7d1; }
-        .copy-box {
-          padding: 12px 14px;
-          margin-top: 12px;
-          color: #d7e2f0;
-        }
-        .department-shell { display: grid; gap: 14px; }
-        .department-head h2 { margin: 4px 0 0; font-size: 28px; }
-        .task-column-head {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 14px;
-        }
+        .badge-online, .badge-ok { background: rgba(86, 243, 154, 0.12); color: var(--ok); }
+        .badge-degraded, .badge-warn, .badge-review { background: rgba(255, 208, 92, 0.14); color: var(--warn); }
+        .badge-offline, .badge-danger, .badge-blocked { background: rgba(255, 91, 110, 0.14); color: var(--danger); }
+        .badge-running, .badge-info, .badge-ready { background: rgba(121, 240, 255, 0.14); color: var(--accent); }
+        .priority { color: var(--accent-warm); }
+        .task-board { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .task-column { border-radius: 24px; border: 1px solid var(--panel-border); background: rgba(8, 20, 24, 0.85); padding: 16px; }
+        .task-column-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .task-column-body { display: grid; gap: 12px; }
-        .task-card { padding: 16px; }
-        .task-card h4 { margin: 10px 0 8px; font-size: 20px; letter-spacing: -0.02em; }
-        .task-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-        .priority { color: var(--muted); font-weight: 800; letter-spacing: .08em; font-size: 12px; }
-        .task-ready { border-color: rgba(77,247,255,.16); }
-        .task-running { border-color: rgba(106,255,155,.18); }
-        .task-blocked { border-color: rgba(255,91,122,.24); }
-        .task-review { border-color: rgba(255,179,71,.22); }
-        .task-done { border-color: rgba(77,247,255,.16); }
-        .empty-copy { padding: 14px; border: 1px dashed rgba(77,247,255,.16); border-radius: 16px; }
-        @media (max-width: 1180px) {
-          .shell { grid-template-columns: 1fr; }
-          .sidebar { position: static; }
-          .grid-three, .task-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .task-card {
+          border-radius: 20px;
+          border: 1px solid rgba(121, 240, 255, 0.12);
+          background: rgba(255, 255, 255, 0.02);
+          padding: 16px;
         }
-        @media (max-width: 860px) {
-          .hero, .hero-grid, .grid-two, .grid-three, .panel-grid, .task-board { grid-template-columns: 1fr; }
-          .card-grid { grid-template-columns: 1fr; }
+        .task-card p { color: var(--muted); line-height: 1.7; }
+
+        .action-btn {
+          appearance: none;
+          border: 1px solid rgba(121, 240, 255, 0.24);
+          background: rgba(121, 240, 255, 0.08);
+          color: var(--text);
+          border-radius: 999px;
+          padding: 10px 14px;
+          cursor: pointer;
+        }
+        .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .action-danger { border-color: rgba(255, 91, 110, 0.24); background: rgba(255, 91, 110, 0.1); }
+        .token-field { display: grid; gap: 8px; margin: 12px 0; color: var(--muted); }
+        .token-field input, .editor {
+          width: 100%;
+          border-radius: 18px;
+          border: 1px solid rgba(121, 240, 255, 0.16);
+          background: rgba(4, 10, 12, 0.92);
+          color: var(--text);
+          padding: 14px 16px;
+        }
+        .editor { min-height: 420px; resize: vertical; font-family: var(--mono); line-height: 1.7; }
+
+        .workbench-grid { align-items: start; }
+        .staff-list-copy { display: grid; gap: 4px; text-align: right; color: var(--muted); }
+        .story-list li { padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        .story-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+
+        @media (max-width: 1320px) {
+          .app-shell { grid-template-columns: 240px minmax(0, 1fr); }
+          .rail { grid-column: 1 / -1; position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+          .rail-panel { min-height: 100%; }
+        }
+
+        @media (max-width: 980px) {
+          .app-shell, .hero, .grid-two, .grid-three, .card-grid, .task-board { grid-template-columns: 1fr; }
+          .sidebar, .main-column, .rail { position: static; }
+          .rail { display: grid; gap: 16px; }
+          .staff-list-copy { text-align: left; }
         }
       </style>
     </head>
@@ -549,62 +870,89 @@ function renderLayout(title: string, body: string): string {
 }
 
 function sectionLabel(section: MasterSection): string {
-  if (section === "machines") return "机器页";
-  if (section === "staff") return "员工页";
-  if (section === "tasks") return "任务页";
-  if (section === "settings") return "设置页";
+  if (section === "usage") return "用量";
+  if (section === "machines") return "机器";
+  if (section === "staff") return "员工";
+  if (section === "memory") return "记忆";
+  if (section === "docs") return "文档";
+  if (section === "tasks") return "任务";
+  if (section === "settings") return "设置";
   return "总览";
 }
 
 function sectionHint(section: MasterSection): string {
-  if (section === "machines") return "节点、地址、负载、告警";
-  if (section === "staff") return "组织树、状态、阻塞";
-  if (section === "tasks") return "派单、执行、交付、验收";
-  if (section === "settings") return "接线、令牌、实例清单";
-  return "主脑摘要、风险、调度";
+  if (section === "usage") return "用量与订阅";
+  if (section === "machines") return "节点与连接";
+  if (section === "staff") return "人员与当前工作";
+  if (section === "memory") return "真实记忆文件";
+  if (section === "docs") return "共享工作文档";
+  if (section === "tasks") return "任务与停止控制";
+  if (section === "settings") return "接线与令牌";
+  return "总办必看";
 }
 
 function sectionLead(section: MasterSection): string {
-  if (section === "machines") return "查看 4 台 Edge 和总办本机的在线、会话、队列、连接状态。";
-  if (section === "staff") return "按部门与节点查看当前任务、阻塞原因和预计交付。";
-  if (section === "tasks") return "按派单、执行、交付、验收四阶段管理当前工作链路。";
-  if (section === "settings") return "检查当前接线、实例清单和 Master 的安全约束。";
-  return "总办主脑视角下的摘要页，用来判断先盯哪里、先派谁、先救哪台节点。";
+  if (section === "usage") return "保留官方的用量、订阅和数据连接判断，不再用简化版代替。";
+  if (section === "machines") return "把 Master 与四台 Edge 的连接、负载、告警、在线态势放回一个视图。";
+  if (section === "staff") return "点到员工就能看到他现在在做什么、下一步是什么、是否被卡住。";
+  if (section === "memory") return "记忆工作台直接对准真实文件与快照，支持写回。";
+  if (section === "docs") return "文档工作台只保留真正影响运行的共享文档和核心工作文档。";
+  if (section === "tasks") return "任务页补上总办控制动作，先支持手动停止和责任节点定位。";
+  if (section === "settings") return "把接线状态、控制能力和本地 token 入口统一收在设置页。";
+  return "总办主脑看摘要、派单、盯风险，同时保留官方关键功能位。";
 }
 
 function statusLabel(status: InstanceSummary["status"]): string {
-  if (status === "online") return "ONLINE";
-  if (status === "degraded") return "DEGRADED";
-  if (status === "offline") return "OFFLINE";
-  return "UNKNOWN";
+  if (status === "online") return "在线";
+  if (status === "degraded") return "降级";
+  if (status === "offline") return "离线";
+  return "未知";
 }
 
 function staffStateLabel(state: StaffView["state"]): string {
-  if (state === "online_ready") return "在线可派";
-  if (state === "busy_running") return "忙碌执行";
-  if (state === "blocked_waiting") return "阻塞待解";
-  return "离线维护";
+  if (state === "busy_running") return "忙碌中";
+  if (state === "blocked_waiting") return "阻塞中";
+  if (state === "offline_maintenance") return "离线维护";
+  return "待命中";
 }
 
 function mapStaffStateBadge(state: StaffView["state"]): "online" | "degraded" | "offline" {
-  if (state === "online_ready" || state === "busy_running") return "online";
+  if (state === "busy_running") return "online";
   if (state === "blocked_waiting") return "degraded";
-  return "offline";
+  if (state === "offline_maintenance") return "offline";
+  return "online";
 }
 
 function taskStatusLabel(status: WorkItem["status"]): string {
-  if (status === "ready") return "READY";
-  if (status === "running") return "RUNNING";
-  if (status === "blocked") return "BLOCKED";
-  if (status === "review") return "REVIEW";
-  return "DONE";
+  if (status === "ready") return "待执行";
+  if (status === "running") return "执行中";
+  if (status === "blocked") return "阻塞";
+  if (status === "review") return "待复核";
+  return "已完成";
 }
 
-function mapTaskStatusBadge(status: WorkItem["status"]): "online" | "degraded" | "offline" | "unknown" {
-  if (status === "running" || status === "done") return "online";
-  if (status === "review" || status === "ready") return "unknown";
-  if (status === "blocked") return "offline";
-  return "unknown";
+function stageLabel(stage: WorkItem["stage"]): string {
+  if (stage === "dispatch") return "派单";
+  if (stage === "execution") return "执行";
+  if (stage === "delivery") return "交付";
+  return "验收";
+}
+
+function mapTaskStatusBadge(status: WorkItem["status"]): string {
+  if (status === "running") return "running";
+  if (status === "blocked") return "blocked";
+  if (status === "review") return "review";
+  if (status === "done") return "ok";
+  return "ready";
+}
+
+function formatUsageCost(cost: number | undefined, tokens: number | undefined): string {
+  if (cost === undefined || tokens === undefined) return "未连接";
+  return `${formatInt(tokens)} tokens / $${cost.toFixed(2)}`;
+}
+
+function formatInt(value: number): string {
+  return value.toLocaleString("zh-CN");
 }
 
 function escapeHtml(value: string): string {
@@ -615,4 +963,3 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
-

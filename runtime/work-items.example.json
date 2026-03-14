@@ -10,6 +10,8 @@
     "summary": "总办需要确认 Master 与 4 台 Edge 的部署顺序和开放窗口。",
     "latestAction": "等待总办确认最终部署时段。",
     "blockers": [],
+    "crew": ["main"],
+    "sessionKeys": ["agent:main:main"],
     "dueAt": "今天 22:00",
     "acceptanceNote": "部署窗口确认后进入执行阶段。"
   },
@@ -24,6 +26,8 @@
     "summary": "设计部负责产出总览页、机器页和按钮系统的视觉草稿。",
     "latestAction": "正在完善主脑视角首屏、状态徽章与操作按钮风格。",
     "blockers": [],
+    "crew": ["main"],
+    "sessionKeys": ["agent:main:design"],
     "dueAt": "明天 12:00",
     "acceptanceNote": "总办确认后进入交付。"
   },
@@ -38,6 +42,8 @@
     "summary": "运营部汇总总办主脑每日必看指标与优先级顺序。",
     "latestAction": "指标草单已提交，等待总办复核。",
     "blockers": [],
+    "crew": ["main"],
+    "sessionKeys": ["agent:main:ops"],
     "dueAt": "今天 18:00",
     "acceptanceNote": "若无异议则转入验收。"
   },
@@ -54,6 +60,8 @@
     "blockers": [
       "一台 Edge 的反向代理入口尚未确认"
     ],
+    "crew": ["main"],
+    "sessionKeys": ["agent:main:sre"],
     "dueAt": "今天 20:00",
     "acceptanceNote": "链路可达后再继续部署。"
   },
@@ -68,6 +76,8 @@
     "summary": "文案部整理状态口径、字段命名与页面提示语。",
     "latestAction": "文案清单已回传，等待最后验收。",
     "blockers": [],
+    "crew": ["main"],
+    "sessionKeys": ["agent:main:copy"],
     "dueAt": "明天 10:00",
     "acceptanceNote": "通过后固化进页面。"
   }

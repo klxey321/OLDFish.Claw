@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { WorkItem, WorkStage, WorkStatus } from "../types";
 
 export async function loadWorkItems(path: string): Promise<WorkItem[]> {
@@ -16,6 +17,32 @@ export async function loadWorkItems(path: string): Promise<WorkItem[]> {
     }
     throw error;
   }
+}
+
+export async function writeWorkItems(path: string, items: WorkItem[]): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(items, null, 2)}\n`, "utf8");
+}
+
+export async function stopWorkItem(path: string, workId: string, stoppedBy: string): Promise<WorkItem | undefined> {
+  const items = await loadWorkItems(path);
+  const nextItems = items.map((item) => {
+    if (item.workId !== workId) return item;
+    const nextStatus: WorkItem["status"] = item.status === "done" ? "done" : "blocked";
+    return {
+      ...item,
+      status: nextStatus,
+      latestAction: "总办已手动停止该任务，等待重新派发。",
+      blockers: uniqueStrings(["总办手动停止", ...item.blockers]),
+      stoppedAt: new Date().toISOString(),
+      stoppedBy,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+  const target = nextItems.find((item) => item.workId === workId);
+  if (!target) return undefined;
+  await writeWorkItems(path, nextItems);
+  return target;
 }
 
 function normalizeItems(input: unknown): WorkItem[] {
@@ -62,7 +89,16 @@ function normalizeItem(input: unknown): WorkItem | undefined {
     blockers: Array.isArray(obj.blockers) ? obj.blockers.filter((item): item is string => typeof item === "string") : [],
     dueAt: asString(obj.dueAt),
     acceptanceNote: asString(obj.acceptanceNote),
+    crew: Array.isArray(obj.crew) ? obj.crew.filter((item): item is string => typeof item === "string") : [],
+    sessionKeys: Array.isArray(obj.sessionKeys) ? obj.sessionKeys.filter((item): item is string => typeof item === "string") : [],
+    updatedAt: asString(obj.updatedAt),
+    stoppedAt: asString(obj.stoppedAt),
+    stoppedBy: asString(obj.stoppedBy),
   };
+}
+
+function uniqueStrings(input: string[]): string[] {
+  return [...new Set(input.filter(Boolean))];
 }
 
 function isFsNotFound(error: unknown): boolean {
@@ -90,4 +126,3 @@ function asStatus(input: unknown): WorkStatus | undefined {
 function asPriority(input: unknown): "p0" | "p1" | "p2" | undefined {
   return input === "p0" || input === "p1" || input === "p2" ? input : undefined;
 }
-

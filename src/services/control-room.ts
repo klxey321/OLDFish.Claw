@@ -1,10 +1,14 @@
-import type { AggregatedSummary, StaffView, WorkItem } from "../types";
+import type { AggregatedSummary, StaffTaskSummary, StaffView, WorkItem } from "../types";
 
 export function buildStaffViews(summary: AggregatedSummary, workItems: WorkItem[]): StaffView[] {
   return summary.nodes.map((node) => {
     const assigned = workItems.filter((item) => item.ownerInstanceId === node.instanceId);
     const current = assigned.find((item) => item.status === "running" || item.status === "blocked" || item.status === "review") ?? assigned[0];
     const blocked = assigned.find((item) => item.status === "blocked");
+    const activeTasks = assigned
+      .filter((item) => item.status === "running" || item.status === "blocked" || item.status === "review")
+      .map(toStaffTaskSummary);
+    const nextTask = assigned.find((item) => item.status === "ready" || item.status === "review");
 
     return {
       instanceId: node.instanceId,
@@ -20,6 +24,8 @@ export function buildStaffViews(summary: AggregatedSummary, workItems: WorkItem[
       expectedDelivery: current?.dueAt,
       acceptanceNote: current?.acceptanceNote,
       sourceStatus: node.status,
+      activeTasks,
+      nextTask: nextTask ? toStaffTaskSummary(nextTask) : undefined,
     };
   });
 }
@@ -50,3 +56,14 @@ function fallbackRecentOutput(node: AggregatedSummary["nodes"][number]): string 
   return "当前无活跃输出，处于待命状态。";
 }
 
+function toStaffTaskSummary(item: WorkItem): StaffTaskSummary {
+  return {
+    workId: item.workId,
+    title: item.title,
+    stage: item.stage,
+    status: item.status,
+    priority: item.priority,
+    latestAction: item.latestAction,
+    dueAt: item.dueAt,
+  };
+}

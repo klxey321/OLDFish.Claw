@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AggregatedSummary, AppConfig, InstanceConfig, InstanceSummary, StaffView, WorkItem } from "../src/types";
+import type { AggregatedSummary, AppConfig, DashboardInsights, InstanceConfig, InstanceSummary, StaffView, WorkItem } from "../src/types";
 import { renderEdgePage, renderMasterPage } from "../src/ui/render";
 
 const summary: InstanceSummary = {
@@ -68,11 +68,14 @@ test("renderMasterPage renders node cards", () => {
     gatewayUrl: "ws://127.0.0.1:18789",
     openclawHome: undefined,
     codexHome: undefined,
+    subscriptionSnapshotPath: undefined,
     instancesPath: "/tmp/instances.json",
     localStatePath: "/tmp/local-state.json",
     workItemsPath: "/tmp/work-items.json",
     localTokenAuthRequired: true,
     localApiToken: "",
+    fileEditEnabled: true,
+    taskControlEnabled: true,
     masterFetchTimeoutMs: 3000,
     uiRefreshSeconds: 15,
     defaultStatus: "online",
@@ -95,6 +98,8 @@ test("renderMasterPage renders node cards", () => {
       currentTask: "确认部署窗口",
       recentOutput: "正在审阅总控部署。",
       sourceStatus: "online",
+      activeTasks: [],
+      nextTask: undefined,
     },
   ];
   const workItems: WorkItem[] = [
@@ -123,6 +128,65 @@ test("renderMasterPage renders node cards", () => {
       enabled: true,
     },
   ];
+  const insights: DashboardInsights = {
+    usage: {
+      runtimeConnected: true,
+      codexConnected: false,
+      subscriptionConnected: false,
+      currentStatus: "运行时已接通",
+      providerLabel: "gpt-5.2-codex",
+      windowLabel: "订阅窗口未连接",
+      todayTokens: 18000,
+      todayCost: 0.8,
+      planLabel: "等待接入订阅快照",
+      notes: [],
+    },
+    agents: [
+      {
+        agentId: "main",
+        label: "Main",
+        workspace: "/root/.openclaw/workspace",
+        activeSessions: 1,
+        activeTasks: 1,
+        currentTask: "确认部署窗口",
+        status: "active",
+        channels: ["telegram"],
+        notes: [],
+      },
+    ],
+    schedules: {
+      totalJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: "2026-03-14T13:00:00.000Z",
+      heartbeatEnabled: true,
+      heartbeatEvery: "30m",
+      heartbeatWindow: "08:00 - 23:00",
+      heartbeatLastSeenAt: "2026-03-14T12:00:00.000Z",
+      items: [
+        {
+          jobId: "heartbeat:main",
+          name: "任务心跳",
+          enabled: true,
+          kind: "heartbeat",
+          nextRunAt: "2026-03-14T12:30:00.000Z",
+          lastRunAt: "2026-03-14T12:00:00.000Z",
+          lastStatus: "ok",
+        },
+      ],
+    },
+    memory: {
+      kind: "memory",
+      connected: true,
+      facets: [],
+      files: [],
+    },
+    docs: {
+      kind: "docs",
+      connected: true,
+      facets: [],
+      files: [],
+    },
+  };
   const html = renderMasterPage({
     section: "overview",
     summary: dashboard,
@@ -130,9 +194,10 @@ test("renderMasterPage renders node cards", () => {
     staffViews,
     workItems,
     instances,
+    insights,
   });
 
-  assert(html.includes("MASTER CONTROL"));
+  assert(html.includes("CONTROL ROOM"));
   assert(html.includes("五节点态势"));
   assert(html.includes("总办主脑"));
   assert(html.includes("待总办处理"));

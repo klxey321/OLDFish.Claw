@@ -3,6 +3,7 @@ export type HealthState = "online" | "degraded" | "offline" | "unknown";
 export type SummarySource = "local" | "remote" | "synthetic";
 export type WorkStage = "dispatch" | "execution" | "delivery" | "acceptance";
 export type WorkStatus = "ready" | "running" | "blocked" | "review" | "done";
+export type WorkbenchKind = "memory" | "docs";
 
 export interface InstanceConfig {
   instanceId: string;
@@ -93,6 +94,8 @@ export interface StaffView {
   expectedDelivery?: string;
   acceptanceNote?: string;
   sourceStatus: HealthState;
+  activeTasks: StaffTaskSummary[];
+  nextTask?: StaffTaskSummary;
 }
 
 export interface WorkItem {
@@ -108,6 +111,112 @@ export interface WorkItem {
   blockers: string[];
   dueAt?: string;
   acceptanceNote?: string;
+  crew?: string[];
+  sessionKeys?: string[];
+  updatedAt?: string;
+  stoppedAt?: string;
+  stoppedBy?: string;
+}
+
+export interface StaffTaskSummary {
+  workId: string;
+  title: string;
+  stage: WorkStage;
+  status: WorkStatus;
+  priority: WorkItem["priority"];
+  latestAction: string;
+  dueAt?: string;
+}
+
+export interface UsageSnapshot {
+  runtimeConnected: boolean;
+  codexConnected: boolean;
+  subscriptionConnected: boolean;
+  currentStatus: string;
+  providerLabel: string;
+  windowLabel: string;
+  todayTokens?: number;
+  todayCost?: number;
+  planLabel?: string;
+  remainingBudgetPercent?: number;
+  notes: string[];
+}
+
+export interface AgentInsight {
+  agentId: string;
+  label: string;
+  workspace?: string;
+  activeSessions: number;
+  activeTasks: number;
+  currentTask?: string;
+  status: "active" | "idle" | "warning";
+  channels: string[];
+  lastSeenAt?: string;
+  notes: string[];
+}
+
+export interface ScheduleItem {
+  jobId: string;
+  name: string;
+  enabled: boolean;
+  kind: "cron" | "heartbeat";
+  channel?: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastStatus?: string;
+  error?: string;
+}
+
+export interface ScheduleSnapshot {
+  totalJobs: number;
+  enabledJobs: number;
+  nextRunAt?: string;
+  heartbeatEnabled: boolean;
+  heartbeatEvery?: string;
+  heartbeatWindow?: string;
+  heartbeatLastSeenAt?: string;
+  items: ScheduleItem[];
+}
+
+export interface WorkbenchFacet {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface WorkbenchFile {
+  kind: WorkbenchKind;
+  facet: string;
+  title: string;
+  category: string;
+  absolutePath: string;
+  relativePath: string;
+  updatedAt?: string;
+  sizeBytes: number;
+  editable: boolean;
+  preview: string;
+}
+
+export interface WorkbenchSnapshot {
+  kind: WorkbenchKind;
+  connected: boolean;
+  rootPath?: string;
+  note?: string;
+  facets: WorkbenchFacet[];
+  files: WorkbenchFile[];
+}
+
+export interface WorkbenchFileDetail {
+  entry: WorkbenchFile;
+  content: string;
+}
+
+export interface DashboardInsights {
+  usage: UsageSnapshot;
+  agents: AgentInsight[];
+  schedules: ScheduleSnapshot;
+  memory: WorkbenchSnapshot;
+  docs: WorkbenchSnapshot;
 }
 
 export interface AppConfig {
@@ -124,11 +233,14 @@ export interface AppConfig {
   gatewayUrl?: string;
   openclawHome?: string;
   codexHome?: string;
+  subscriptionSnapshotPath?: string;
   instancesPath: string;
   localStatePath: string;
   workItemsPath: string;
   localTokenAuthRequired: boolean;
   localApiToken: string;
+  fileEditEnabled: boolean;
+  taskControlEnabled: boolean;
   masterFetchTimeoutMs: number;
   uiRefreshSeconds: number;
   defaultStatus: HealthState;
