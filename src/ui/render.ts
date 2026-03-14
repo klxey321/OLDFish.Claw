@@ -4,6 +4,8 @@ import type {
   DashboardInsights,
   InstanceConfig,
   InstanceSummary,
+  ModelCatalogSnapshot,
+  NativeChatAccess,
   StaffTaskSummary,
   StaffView,
   WorkItem,
@@ -11,7 +13,16 @@ import type {
   WorkbenchSnapshot,
 } from "../types";
 
-export type MasterSection = "overview" | "usage" | "machines" | "staff" | "memory" | "docs" | "tasks" | "settings";
+export type MasterSection =
+  | "overview"
+  | "chat"
+  | "usage"
+  | "machines"
+  | "staff"
+  | "memory"
+  | "docs"
+  | "tasks"
+  | "settings";
 
 interface MasterRenderInput {
   section: MasterSection;
@@ -21,6 +32,8 @@ interface MasterRenderInput {
   workItems: WorkItem[];
   instances: InstanceConfig[];
   insights: DashboardInsights;
+  modelCatalog: ModelCatalogSnapshot;
+  nativeChatAccess: NativeChatAccess;
   selectedStaffId?: string;
   selectedFile?: WorkbenchFileDetail;
   notice?: string;
@@ -44,6 +57,7 @@ export function renderMasterPage(input: MasterRenderInput): string {
         </div>
         <nav class="nav-list">
           ${renderNavLink("overview", input.section)}
+          ${renderNavLink("chat", input.section)}
           ${renderNavLink("usage", input.section)}
           ${renderNavLink("machines", input.section)}
           ${renderNavLink("staff", input.section)}
@@ -152,6 +166,7 @@ export function renderLoginPage(input: {
 }
 
 function renderSection(input: MasterRenderInput): string {
+  if (input.section === "chat") return renderChatSection(input);
   if (input.section === "usage") return renderUsageSection(input);
   if (input.section === "machines") return renderMachinesSection(input.summary.nodes);
   if (input.section === "staff") return renderStaffSection(input);
@@ -202,6 +217,10 @@ function renderOverviewSection(input: MasterRenderInput): string {
           <li>今日估算：${formatUsageCost(input.insights.usage.todayCost, input.insights.usage.todayTokens)}</li>
         </ul>
       </article>
+    </section>
+    <section class="grid-two">
+      ${renderModelControlPanel(input.modelCatalog)}
+      ${renderChatQuickPanel(input.nativeChatAccess)}
     </section>
     <section class="section-head">
       <h2>五节点态势</h2>
@@ -384,6 +403,125 @@ function renderSettingsSection(input: MasterRenderInput): string {
       </article>
     </section>
   `;
+}
+
+function renderChatSection(input: MasterRenderInput): string {
+  const access = input.nativeChatAccess;
+  const accessPayload = JSON.stringify(access);
+  return `
+    <section class="grid-two">
+      <article class="panel panel-large">
+        <div class="eyebrow">原生聊天</div>
+        <h2>OpenClaw Chat 已同步</h2>
+        <div class="copy-box">这里直接接入原生 Web UI，所以暂停任务、删除历史、Slash 命令和会话侧边栏都和现在的 OpenClaw 一致。</div>
+        <ul class="detail-list">
+          <li>入口：${access.enabled ? `<code>${escapeHtml(access.framePath)}</code>` : "未接通"}</li>
+          <li>能力：暂停运行、删除历史、切换会话、查看实时流。</li>
+          <li>接线：通过总办主脑的 Gateway 反代路径，不单独暴露新的公网端口。</li>
+        </ul>
+        ${access.enabled ? `<div class="meta"><a href="${escapeHtml(access.framePath)}" target="_blank" rel="noreferrer">在新标签打开原生聊天</a></div>` : `<div class="empty-copy">${escapeHtml(access.note ?? "当前无法加载原生聊天页。")}</div>`}
+      </article>
+      ${renderModelControlPanel(input.modelCatalog, { compact: true })}
+    </section>
+    <section class="panel panel-large native-chat-panel">
+      <div class="native-chat-head">
+        <div>
+          <div class="eyebrow">聊天工作台</div>
+          <h2>暂停、删除、继续都走原生入口</h2>
+        </div>
+        <button class="action-btn" type="button" data-reload-native-chat${access.enabled ? "" : " disabled"}>重载聊天页</button>
+      </div>
+      ${
+        access.enabled
+          ? `<div class="native-chat-frame-wrap">
+              <div class="native-chat-loading" data-native-chat-status>正在接入原生聊天页...</div>
+              <iframe class="native-chat-frame" data-native-chat-frame title="OpenClaw Native Chat" loading="lazy"></iframe>
+            </div>
+            <script type="application/json" data-native-chat-access>${serializeJsonForHtml(accessPayload)}</script>`
+          : `<div class="empty-copy">${escapeHtml(access.note ?? "原生聊天页暂不可用。")}</div>`
+      }
+    </section>
+  `;
+}
+
+function renderModelControlPanel(
+  catalog: ModelCatalogSnapshot,
+  options: { compact?: boolean } = {},
+): string {
+  const modelCards = catalog.models.slice(0, options.compact ? 6 : 10);
+  return `<article class="panel panel-large">
+    <div class="eyebrow">模型控制台</div>
+    <h2>查看、添加、切换 AI 模型</h2>
+    ${
+      catalog.connected
+        ? `<div class="copy-box">当前主模型：${escapeHtml(catalog.primaryModel ?? "未设置")} · 回退：${escapeHtml(catalog.fallbackModels.join(", ") || "未配置")}</div>`
+        : `<div class="empty-copy">${escapeHtml(catalog.note ?? "模型配置暂不可用。")}</div>`
+    }
+    ${
+      catalog.connected
+        ? `<div class="stack-list model-stack">${modelCards.map(renderModelCard).join("")}</div>
+           <div class="meta">Provider：${catalog.providers.map((item) => `${item.key} (${item.modelCount})`).join(" · ") || "未发现"}。</div>
+           <form class="model-form" data-add-model-form>
+             <label>
+               <span>Provider</span>
+               <select name="providerKey">
+                 ${catalog.providers.map((item) => `<option value="${escapeHtml(item.key)}">${escapeHtml(item.key)}</option>`).join("")}
+               </select>
+             </label>
+             <label>
+               <span>模型 ID</span>
+               <input name="modelId" type="text" placeholder="gpt-5.2-mini" required />
+             </label>
+             <label>
+               <span>显示名</span>
+               <input name="name" type="text" placeholder="gpt-5.2-mini" />
+             </label>
+             <label>
+               <span>API 类型</span>
+               <input name="api" type="text" placeholder="openai-completions" />
+             </label>
+             <label>
+               <span>上下文窗口</span>
+               <input name="contextWindow" type="number" min="1" placeholder="200000" />
+             </label>
+             <label>
+               <span>Max Tokens</span>
+               <input name="maxTokens" type="number" min="1" placeholder="8192" />
+             </label>
+             <label class="toggle-field">
+               <input name="reasoning" type="checkbox" />
+               <span>开启 reasoning</span>
+             </label>
+             <label class="toggle-field">
+               <input name="setPrimary" type="checkbox" />
+               <span>添加后立即切为主模型</span>
+             </label>
+             <button class="action-btn" type="submit">添加并热重载</button>
+           </form>`
+        : ""
+    }
+  </article>`;
+}
+
+function renderChatQuickPanel(access: NativeChatAccess): string {
+  return `<article class="panel panel-large">
+    <div class="eyebrow">聊天入口</div>
+    <h2>原生聊天工作台</h2>
+    <div class="copy-box">你要的暂停、删历史、随时插手会话，直接走原生聊天页最稳，不会丢官方刚补上的能力。</div>
+    <ul class="detail-list">
+      <li>接入方式：总办域名下的内嵌代理路径。</li>
+      <li>会话来源：当前主脑 OpenClaw 的真实 session store。</li>
+      <li>跳转：菜单新增 <code>聊天</code> 页面。</li>
+    </ul>
+    ${
+      access.enabled
+        ? `<div class="chat-quick-actions">
+             <a class="action-btn" href="/chat">进入聊天</a>
+             <a class="action-btn" href="${escapeHtml(access.framePath)}" target="_blank" rel="noreferrer">原生新标签</a>
+           </div>`
+        : `<div class="empty-copy">${escapeHtml(access.note ?? "当前还未接通原生聊天入口。")}</div>`
+    }
+  </article>`;
 }
 
 function renderHero(input: MasterRenderInput): string {
@@ -584,6 +722,31 @@ function renderInstanceCard(instance: InstanceConfig): string {
   </div>`;
 }
 
+function renderModelCard(model: ModelCatalogSnapshot["models"][number]): string {
+  return `<div class="model-card">
+    <div class="machine-head">
+      <div>
+        <div class="eyebrow">${escapeHtml(model.providerKey)}</div>
+        <h3>${escapeHtml(model.name)}</h3>
+      </div>
+      <div class="badge-row">
+        ${model.isPrimary ? `<span class="badge badge-running">主模型</span>` : ""}
+        ${model.isFallback ? `<span class="badge badge-review">回退</span>` : ""}
+      </div>
+    </div>
+    <ul class="detail-list">
+      <li>ID：<code>${escapeHtml(model.id)}</code></li>
+      <li>API：${escapeHtml(model.api ?? "未标注")}</li>
+      <li>Reasoning：${model.reasoning ? "开启" : "关闭"}</li>
+      <li>上下文：${model.contextWindow ? formatInt(model.contextWindow) : "未标注"}</li>
+    </ul>
+    <div class="chat-quick-actions">
+      <button class="action-btn" type="button" data-set-primary-model="${escapeHtml(model.id)}"${model.isPrimary ? " disabled" : ""}>设为主模型</button>
+      <span class="meta">切换后自动热重载 Gateway。</span>
+    </div>
+  </div>`;
+}
+
 function renderAgentStory(item: DashboardInsights["agents"][number]): string {
   return `<li>
     <strong>${escapeHtml(item.label)}</strong>
@@ -696,24 +859,74 @@ function renderAppScript(config: AppConfig): string {
           ...(token ? { "x-local-token": token } : {}),
         };
       };
+      const postJson = async (url, payload) => {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(payload),
+        });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text || "request_failed");
+        return text ? JSON.parse(text) : {};
+      };
 
       document.querySelectorAll("[data-stop-work-id]").forEach((button) => {
         button.addEventListener("click", async () => {
           const workId = button.getAttribute("data-stop-work-id");
           if (!workId) return;
           if (!window.confirm("确认停止这个任务？")) return;
-          const response = await fetch("/api/work-items/stop", {
-            method: "POST",
-            headers: headers(),
-            body: JSON.stringify({ workId }),
-          });
-          if (!response.ok) {
-            const text = await response.text();
-            window.alert("停止任务失败：" + text);
-            return;
+          try {
+            await postJson("/api/work-items/stop", { workId });
+            window.location.href = "/tasks?notice=task-stopped";
+          } catch (error) {
+            window.alert("停止任务失败：" + (error instanceof Error ? error.message : String(error)));
           }
-          window.location.href = "/tasks?notice=task-stopped";
         });
+      });
+
+      document.querySelectorAll("[data-set-primary-model]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const modelRef = button.getAttribute("data-set-primary-model");
+          if (!modelRef) return;
+          if (!window.confirm("确认把默认模型切到 " + modelRef + "？这会热重载 Gateway。")) return;
+          try {
+            button.setAttribute("disabled", "disabled");
+            await postJson("/api/models/primary", { modelRef });
+            window.location.reload();
+          } catch (error) {
+            button.removeAttribute("disabled");
+            window.alert("切换模型失败：" + (error instanceof Error ? error.message : String(error)));
+          }
+        });
+      });
+
+      document.querySelector("[data-add-model-form]")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const submitter = form.querySelector('button[type="submit"]');
+        const formData = new window.FormData(form);
+        const payload = {
+          providerKey: String(formData.get("providerKey") || "").trim(),
+          modelId: String(formData.get("modelId") || "").trim(),
+          name: String(formData.get("name") || "").trim(),
+          api: String(formData.get("api") || "").trim(),
+          contextWindow: String(formData.get("contextWindow") || "").trim(),
+          maxTokens: String(formData.get("maxTokens") || "").trim(),
+          reasoning: formData.get("reasoning") === "on",
+          setPrimary: formData.get("setPrimary") === "on",
+        };
+        if (!payload.providerKey || !payload.modelId) {
+          window.alert("Provider 和模型 ID 不能为空。");
+          return;
+        }
+        try {
+          submitter?.setAttribute("disabled", "disabled");
+          await postJson("/api/models/add", payload);
+          window.location.reload();
+        } catch (error) {
+          submitter?.removeAttribute("disabled");
+          window.alert("添加模型失败：" + (error instanceof Error ? error.message : String(error)));
+        }
       });
 
       document.querySelector("[data-save-file]")?.addEventListener("click", async (event) => {
@@ -722,21 +935,54 @@ function renderAppScript(config: AppConfig): string {
         const kind = target.getAttribute("data-kind");
         const editor = document.querySelector("[data-workbench-editor]");
         if (!file || !kind || !editor) return;
-        const response = await fetch("/api/workbench-file", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({
+        try {
+          await postJson("/api/workbench-file", {
             kind,
             file,
             content: editor.value,
-          }),
-        });
-        if (!response.ok) {
-          const text = await response.text();
-          window.alert("保存失败：" + text);
-          return;
+          });
+          window.location.href = "/" + kind + "?file=" + encodeURIComponent(file) + "&notice=file-saved";
+        } catch (error) {
+          window.alert("保存失败：" + (error instanceof Error ? error.message : String(error)));
         }
-        window.location.href = "/" + kind + "?file=" + encodeURIComponent(file) + "&notice=file-saved";
+      });
+
+      const nativeChatScript = document.querySelector("[data-native-chat-access]");
+      const nativeChatFrame = document.querySelector("[data-native-chat-frame]");
+      const nativeChatStatus = document.querySelector("[data-native-chat-status]");
+      const setNativeChatStatus = (message) => {
+        if (nativeChatStatus) nativeChatStatus.textContent = message;
+      };
+      const mountNativeChat = () => {
+        if (!nativeChatScript || !nativeChatFrame) return;
+        try {
+          const access = JSON.parse(nativeChatScript.textContent || "{}");
+          if (!access.enabled || !access.gatewayToken || !access.basePath || !access.framePath) {
+            setNativeChatStatus(access.note || "原生聊天入口未接通。");
+            return;
+          }
+          const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+          const gatewayUrl = scheme + "://" + window.location.host + access.basePath;
+          const sessionKey = "openclaw.control.token.v1:" + gatewayUrl;
+          window.sessionStorage.removeItem("openclaw.control.token.v1");
+          window.sessionStorage.setItem(sessionKey, access.gatewayToken);
+          setNativeChatStatus("正在加载原生聊天面板...");
+          nativeChatFrame.src = access.framePath;
+        } catch (error) {
+          setNativeChatStatus("原生聊天接入失败：" + (error instanceof Error ? error.message : String(error)));
+        }
+      };
+
+      if (nativeChatFrame) {
+        nativeChatFrame.addEventListener("load", () => {
+          setNativeChatStatus("原生聊天面板已接入。");
+        });
+        mountNativeChat();
+      }
+
+      document.querySelector("[data-reload-native-chat]")?.addEventListener("click", () => {
+        if (nativeChatFrame) nativeChatFrame.src = "about:blank";
+        window.setTimeout(mountNativeChat, 120);
       });
     })();
   </script>`;
@@ -1006,7 +1252,7 @@ function renderLayout(title: string, body: string): string {
         .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .action-danger { border-color: rgba(255, 91, 110, 0.24); background: rgba(255, 91, 110, 0.1); }
         .token-field { display: grid; gap: 8px; margin: 12px 0; color: var(--muted); }
-        .token-field input, .editor, .auth-form input {
+        .token-field input, .editor, .auth-form input, .model-form input, .model-form select {
           width: 100%;
           border-radius: 20px;
           border: 1px solid rgba(121, 240, 255, 0.16);
@@ -1039,6 +1285,67 @@ function renderLayout(title: string, body: string): string {
           overflow-wrap: anywhere;
           word-break: break-word;
         }
+        .badge-row, .chat-quick-actions, .native-chat-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .model-card {
+          padding: 16px;
+          border-radius: 24px;
+          border: 1px solid rgba(121, 240, 255, 0.12);
+          background: rgba(255, 255, 255, 0.025);
+        }
+        .model-stack { margin: 14px 0; }
+        .model-form {
+          margin-top: 16px;
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .model-form label {
+          display: grid;
+          gap: 8px;
+          color: var(--muted);
+        }
+        .toggle-field {
+          grid-template-columns: 18px minmax(0, 1fr);
+          align-items: center;
+          align-content: center;
+          min-height: 52px;
+        }
+        .toggle-field input {
+          width: 18px;
+          height: 18px;
+          margin: 0;
+          padding: 0;
+        }
+        .native-chat-panel { padding-bottom: 24px; }
+        .native-chat-head { justify-content: space-between; margin-bottom: 14px; }
+        .native-chat-frame-wrap {
+          position: relative;
+          min-height: 940px;
+          border-radius: 26px;
+          overflow: hidden;
+          border: 1px solid rgba(121, 240, 255, 0.12);
+          background: rgba(2, 5, 8, 0.88);
+        }
+        .native-chat-loading {
+          position: absolute;
+          top: 16px;
+          right: 16px;
+          z-index: 2;
+          padding: 8px 12px;
+          border-radius: 999px;
+          background: rgba(4, 10, 12, 0.88);
+          border: 1px solid rgba(121, 240, 255, 0.18);
+          color: var(--muted);
+          font-family: var(--mono);
+          font-size: 12px;
+        }
+        .native-chat-frame {
+          display: block;
+          width: 100%;
+          min-height: 940px;
+          border: 0;
+          background: #02060b;
+        }
 
         body.is-leaving .app-shell,
         body.is-leaving .edge-shell {
@@ -1069,6 +1376,8 @@ function renderLayout(title: string, body: string): string {
           .sidebar, .main-column, .rail { position: static; }
           .rail { display: grid; gap: 16px; }
           .staff-list-copy { text-align: left; }
+          .model-form { grid-template-columns: 1fr; }
+          .native-chat-frame-wrap, .native-chat-frame { min-height: 760px; }
         }
       </style>
     </head>
@@ -1077,6 +1386,7 @@ function renderLayout(title: string, body: string): string {
 }
 
 function sectionLabel(section: MasterSection): string {
+  if (section === "chat") return "聊天";
   if (section === "usage") return "用量";
   if (section === "machines") return "机器";
   if (section === "staff") return "员工";
@@ -1088,6 +1398,7 @@ function sectionLabel(section: MasterSection): string {
 }
 
 function sectionHint(section: MasterSection): string {
+  if (section === "chat") return "原生聊天面板";
   if (section === "usage") return "用量与订阅";
   if (section === "machines") return "节点与连接";
   if (section === "staff") return "人员与当前工作";
@@ -1099,6 +1410,7 @@ function sectionHint(section: MasterSection): string {
 }
 
 function sectionLead(section: MasterSection): string {
+  if (section === "chat") return "直接复用 OpenClaw 原生聊天 UI，把暂停、删历史、会话侧栏和原生交互一起带回来。";
   if (section === "usage") return "保留官方的用量、订阅和数据连接判断，不再用简化版代替。";
   if (section === "machines") return "把 Master 与四台 Edge 的连接、负载、告警、在线态势放回一个视图。";
   if (section === "staff") return "点到员工就能看到他现在在做什么、下一步是什么、是否被卡住。";
@@ -1165,6 +1477,10 @@ function shortenText(value: string, limit: number): string {
 
 function formatInt(value: number): string {
   return value.toLocaleString("zh-CN");
+}
+
+function serializeJsonForHtml(value: string): string {
+  return value.replaceAll("</script", "<\\/script").replaceAll("<!--", "<\\!--");
 }
 
 function escapeHtml(value: string): string {

@@ -8,6 +8,12 @@ import {
   saveWorkbenchFile,
 } from "./runtime/openclaw-insights";
 import {
+  addConfiguredModel,
+  loadModelCatalog,
+  loadNativeChatAccess,
+  setPrimaryModel,
+} from "./runtime/openclaw-control";
+import {
   clearSessionCookie,
   isAuthEnabled,
   isSecureRequest,
@@ -24,6 +30,8 @@ import type {
   DashboardInsights,
   InstanceConfig,
   InstanceSummary,
+  ModelCatalogSnapshot,
+  NativeChatAccess,
   OperationalInsights,
   StaffView,
   WorkItem,
@@ -41,6 +49,8 @@ interface MasterPageState {
   workItems: WorkItem[];
   staffViews: StaffView[];
   operationalInsights: OperationalInsights;
+  modelCatalog: ModelCatalogSnapshot;
+  nativeChatAccess: NativeChatAccess;
 }
 
 const masterPageCache = new Map<
@@ -146,7 +156,7 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
         ? await loadSelectedWorkbenchFile(config, section, url.searchParams.get("file"))
         : undefined;
 
-    writeHtml(
+      writeHtml(
       res,
       200,
       renderMasterPage({
@@ -161,6 +171,8 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
         selectedFile: fileDetail,
         notice: mapNotice(url.searchParams.get("notice")),
         sessionUsername: session?.username,
+        modelCatalog: pageState.modelCatalog,
+        nativeChatAccess: pageState.nativeChatAccess,
       }),
     );
     return;
@@ -290,6 +302,26 @@ async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Pr
     return;
   }
 
+  if (url.pathname === "/api/models") {
+    if (config.role !== "master") {
+      writeJson(res, 404, { ok: false, error: "master_only" });
+      return;
+    }
+    const state = await loadMasterPageState(config);
+    writeJson(res, 200, state.modelCatalog);
+    return;
+  }
+
+  if (url.pathname === "/api/chat-access") {
+    if (config.role !== "master") {
+      writeJson(res, 404, { ok: false, error: "master_only" });
+      return;
+    }
+    const state = await loadMasterPageState(config);
+    writeJson(res, 200, state.nativeChatAccess);
+    return;
+  }
+
   if (url.pathname === "/api/usage" || url.pathname === "/api/agents" || url.pathname === "/api/schedules") {
     const [localSummary, workItems] = await Promise.all([buildLocalSummary(config), loadWorkItems(config.workItemsPath)]);
     const insights = await buildOperationalInsights(config, workItems, localSummary);
@@ -384,6 +416,71 @@ async function routeApiPost(req: IncomingMessage, res: ServerResponse, config: A
     return;
   }
 
+  if (url.pathname === "/api/models/primary") {
+    if (config.role !== "master") {
+      writeJson(res, 404, { ok: false, error: "master_only" });
+      return;
+    }
+
+    const payload = await readJsonBody(req);
+    const modelRef = typeof payload?.modelRef === "string" ? payload.modelRef.trim() : "";
+    if (!modelRef) {
+      writeJson(res, 400, { ok: false, error: "missing_model_ref" });
+      return;
+    }
+
+    try {
+      const snapshot = await setPrimaryModel(config, modelRef);
+      invalidateMasterPageCache(config);
+      writeJson(res, 200, { ok: true, snapshot });
+    } catch (error) {
+      writeJson(res, 400, {
+        ok: false,
+        error: error instanceof Error ? error.message : "model_update_failed",
+      });
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/models/add") {
+    if (config.role !== "master") {
+      writeJson(res, 404, { ok: false, error: "master_only" });
+      return;
+    }
+
+    const payload = await readJsonBody(req);
+    const providerKey = typeof payload?.providerKey === "string" ? payload.providerKey.trim() : "";
+    const modelId = typeof payload?.modelId === "string" ? payload.modelId.trim() : "";
+    if (!providerKey || !modelId) {
+      writeJson(res, 400, { ok: false, error: "invalid_model_input" });
+      return;
+    }
+
+    const contextWindow = asOptionalPositiveInt(payload?.contextWindow);
+    const maxTokens = asOptionalPositiveInt(payload?.maxTokens);
+    try {
+      const snapshot = await addConfiguredModel(config, {
+        providerKey,
+        modelId,
+        name: typeof payload?.name === "string" ? payload.name.trim() : undefined,
+        api: typeof payload?.api === "string" ? payload.api.trim() : undefined,
+        reasoning: Boolean(payload?.reasoning),
+        contextWindow,
+        maxTokens,
+        setPrimary: Boolean(payload?.setPrimary),
+      });
+
+      invalidateMasterPageCache(config);
+      writeJson(res, 200, { ok: true, snapshot });
+    } catch (error) {
+      writeJson(res, 400, {
+        ok: false,
+        error: error instanceof Error ? error.message : "model_add_failed",
+      });
+    }
+    return;
+  }
+
   writeJson(res, 404, { ok: false, error: "not_found" });
 }
 
@@ -394,10 +491,12 @@ async function loadMasterPageState(config: AppConfig): Promise<MasterPageState> 
   if (cached?.promise) return cached.promise;
 
   const promise = (async () => {
-    const [summary, instances, workItems] = await Promise.all([
+    const [summary, instances, workItems, modelCatalog, nativeChatAccess] = await Promise.all([
       buildMasterSummary(config),
       loadInstances(config.instancesPath),
       loadWorkItems(config.workItemsPath),
+      loadModelCatalog(config),
+      loadNativeChatAccess(config),
     ]);
     const staffViews = buildStaffViews(summary, workItems);
     const operationalInsights = await buildOperationalInsights(config, workItems, summary.master);
@@ -407,6 +506,8 @@ async function loadMasterPageState(config: AppConfig): Promise<MasterPageState> 
       workItems,
       staffViews,
       operationalInsights,
+      modelCatalog,
+      nativeChatAccess,
     } satisfies MasterPageState;
   })();
 
@@ -518,6 +619,15 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
 }
 
+function asOptionalPositiveInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value);
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return undefined;
+}
+
 async function readFormBody(req: IncomingMessage): Promise<URLSearchParams> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -544,6 +654,7 @@ function isMasterSectionRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/overview" ||
+    pathname === "/chat" ||
     pathname === "/usage" ||
     pathname === "/machines" ||
     pathname === "/staff" ||
@@ -555,6 +666,7 @@ function isMasterSectionRoute(pathname: string): boolean {
 }
 
 function resolveMasterSection(pathname: string): MasterSection {
+  if (pathname === "/chat") return "chat";
   if (pathname === "/usage") return "usage";
   if (pathname === "/machines") return "machines";
   if (pathname === "/staff") return "staff";

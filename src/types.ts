@@ -211,6 +211,43 @@ export interface WorkbenchFileDetail {
   content: string;
 }
 
+export interface ModelProviderSummary {
+  key: string;
+  api?: string;
+  baseUrl?: string;
+  modelCount: number;
+}
+
+export interface ModelCatalogEntry {
+  providerKey: string;
+  id: string;
+  name: string;
+  api?: string;
+  reasoning: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+  isPrimary: boolean;
+  isFallback: boolean;
+}
+
+export interface ModelCatalogSnapshot {
+  connected: boolean;
+  configPath?: string;
+  primaryModel?: string;
+  fallbackModels: string[];
+  providers: ModelProviderSummary[];
+  models: ModelCatalogEntry[];
+  note?: string;
+}
+
+export interface NativeChatAccess {
+  enabled: boolean;
+  basePath: string;
+  framePath: string;
+  gatewayToken?: string;
+  note?: string;
+}
+
 export interface DashboardInsights {
   usage: UsageSnapshot;
   agents: AgentInsight[];

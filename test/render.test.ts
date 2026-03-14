@@ -193,6 +193,39 @@ test("renderMasterPage renders node cards", () => {
       files: [],
     },
   };
+  const modelCatalog = {
+    connected: true,
+    configPath: "/root/.openclaw/openclaw.json",
+    primaryModel: "gpt-5.2-codex",
+    fallbackModels: ["gpt-5.2"],
+    providers: [
+      {
+        key: "zj1",
+        api: "openai-completions",
+        baseUrl: "https://example.com/v1",
+        modelCount: 2,
+      },
+    ],
+    models: [
+      {
+        providerKey: "zj1",
+        id: "gpt-5.2-codex",
+        name: "gpt-5.2-codex",
+        api: "openai-completions",
+        reasoning: false,
+        contextWindow: 200000,
+        maxTokens: 8192,
+        isPrimary: true,
+        isFallback: false,
+      },
+    ],
+  } as const;
+  const nativeChatAccess = {
+    enabled: true,
+    basePath: "/__native-chat",
+    framePath: "/__native-chat/chat",
+    gatewayToken: "test-token",
+  } as const;
   const html = renderMasterPage({
     section: "overview",
     summary: dashboard,
@@ -201,10 +234,14 @@ test("renderMasterPage renders node cards", () => {
     workItems,
     instances,
     insights,
+    modelCatalog,
+    nativeChatAccess,
   });
 
   assert(html.includes("CONTROL ROOM"));
   assert(html.includes("五节点态势"));
   assert(html.includes("总办主脑"));
   assert(html.includes("待总办处理"));
+  assert(html.includes("聊天"));
+  assert(html.includes("模型控制台"));
 });
