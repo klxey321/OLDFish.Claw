@@ -9,6 +9,8 @@ test("loadConfig keeps master defaults", () => {
   assert.equal(config.instanceId, "master-hq");
   assert.equal(config.nodeName, "总办主脑");
   assert.equal(config.defaultStatus, "online");
+  assert.equal(config.authRequired, false);
+  assert.equal(config.dashboardCacheTtlMs, 6000);
 });
 
 test("loadConfig respects edge overrides", () => {
@@ -19,6 +21,11 @@ test("loadConfig respects edge overrides", () => {
     NODE_NAME: "腾讯北京",
     EDGE_STATUS: "degraded",
     EDGE_ALERTS: "a,b",
+    AUTH_REQUIRED: "true",
+    LOGIN_USERNAME: "klxey123",
+    LOGIN_PASSWORD: "Hao830403",
+    SESSION_SECRET: "secret",
+    SESSION_TTL_HOURS: "8",
   });
 
   assert.equal(config.role, "edge");
@@ -27,5 +34,9 @@ test("loadConfig respects edge overrides", () => {
   assert.equal(config.nodeName, "腾讯北京");
   assert.equal(config.defaultStatus, "degraded");
   assert.deepEqual(config.defaultAlerts, ["a", "b"]);
+  assert.equal(config.authRequired, true);
+  assert.equal(config.loginUsername, "klxey123");
+  assert.equal(config.loginPassword, "Hao830403");
+  assert.equal(config.sessionSecret, "secret");
+  assert.equal(config.sessionTtlHours, 8);
 });
-

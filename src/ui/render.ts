@@ -24,6 +24,7 @@ interface MasterRenderInput {
   selectedStaffId?: string;
   selectedFile?: WorkbenchFileDetail;
   notice?: string;
+  sessionUsername?: string;
 }
 
 export function renderMasterPage(input: MasterRenderInput): string {
@@ -32,10 +33,14 @@ export function renderMasterPage(input: MasterRenderInput): string {
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand-panel">
-          <div class="brand-chip">MASTER BRAIN</div>
+          <div class="brand-row">
+            <div class="brand-chip">MASTER BRAIN</div>
+            ${input.sessionUsername ? `<a class="logout-link" href="/logout">退出</a>` : ""}
+          </div>
           <h1>OLDFish.Claw</h1>
           <p>总办主脑负责 4 台 Edge 调度、审阅、派单与风险收口。</p>
           <div class="brand-meta">节点 ${input.summary.totals.total} · 在线 ${input.summary.totals.online} · 刷新 ${input.config.uiRefreshSeconds}s</div>
+          ${input.sessionUsername ? `<div class="brand-user">已登录：${escapeHtml(input.sessionUsername)}</div>` : ""}
         </div>
         <nav class="nav-list">
           ${renderNavLink("overview", input.section)}
@@ -63,15 +68,19 @@ export function renderMasterPage(input: MasterRenderInput): string {
   return renderLayout(title, body);
 }
 
-export function renderEdgePage(summary: InstanceSummary): string {
+export function renderEdgePage(summary: InstanceSummary, sessionUsername?: string): string {
   return renderLayout(
     `OLDFish.Claw Edge - ${summary.instanceName}`,
     `<div class="edge-shell">
       <section class="hero edge-hero">
         <div>
-          <div class="brand-chip">EDGE NODE</div>
+          <div class="brand-row">
+            <div class="brand-chip">EDGE NODE</div>
+            ${sessionUsername ? `<a class="logout-link" href="/logout">退出</a>` : ""}
+          </div>
           <h1>${escapeHtml(summary.instanceName)}</h1>
           <p>${escapeHtml(summary.department)} 节点向主脑汇报会话、任务、心跳与接线状态。</p>
+          ${sessionUsername ? `<div class="brand-user">已登录：${escapeHtml(sessionUsername)}</div>` : ""}
         </div>
         <div class="hero-grid">
           ${renderHeroStat("状态", statusLabel(summary.status))}
@@ -104,6 +113,42 @@ export function renderEdgePage(summary: InstanceSummary): string {
       </section>
     </div>`,
   );
+}
+
+export function renderLoginPage(input: {
+  appName: string;
+  next: string;
+  loginEnabled: boolean;
+  error?: string;
+  notice?: string;
+}): string {
+  const body = `
+    <div class="auth-shell">
+      <section class="auth-card">
+        <div class="brand-chip">SECURE ACCESS</div>
+        <h1>${escapeHtml(input.appName)}</h1>
+        <p>总办主脑与节点页面已开启登录保护。先登录，再进入控制台与写操作。</p>
+        ${input.notice ? `<div class="notice-banner auth-notice">${escapeHtml(input.notice)}</div>` : ""}
+        ${input.error ? `<div class="auth-error">${escapeHtml(input.error)}</div>` : ""}
+        ${
+          input.loginEnabled
+            ? `<form class="auth-form" method="post" action="/login">
+                <input type="hidden" name="next" value="${escapeHtml(input.next)}" />
+                <label>
+                  <span>用户名</span>
+                  <input name="username" type="text" autocomplete="username" required />
+                </label>
+                <label>
+                  <span>密码</span>
+                  <input name="password" type="password" autocomplete="current-password" required />
+                </label>
+                <button class="action-btn auth-submit" type="submit">进入主控</button>
+              </form>`
+            : `<div class="copy-box">当前环境还没有配置登录口令，请先在服务器环境变量里设置。</div>`
+        }
+      </section>
+    </div>`;
+  return renderLayout(`${input.appName} 登录`, body);
 }
 
 function renderSection(input: MasterRenderInput): string {
@@ -389,7 +434,10 @@ function renderStatusRail(input: MasterRenderInput): string {
     <section class="rail-panel">
       <div class="eyebrow">定时与心跳</div>
       <h2>定时任务</h2>
-      <div class="meta">Heartbeat ${input.insights.schedules.heartbeatEnabled ? "已开启" : "未开启"} · 下次 ${escapeHtml(input.insights.schedules.nextRunAt ?? "待计算")}</div>
+      <div class="meta heartbeat-meta">
+        <span>Heartbeat ${input.insights.schedules.heartbeatEnabled ? "已开启" : "未开启"}</span>
+        <span>下次 ${escapeHtml(shortenText(input.insights.schedules.nextRunAt ?? "待计算", 26))}</span>
+      </div>
       <ul class="story-list">${scheduleItems.length > 0 ? scheduleItems.map(renderScheduleStory).join("") : `<li>暂无定时任务。</li>`}</ul>
     </section>
   `;
@@ -540,15 +588,15 @@ function renderAgentStory(item: DashboardInsights["agents"][number]): string {
   return `<li>
     <strong>${escapeHtml(item.label)}</strong>
     <span>${item.status === "active" ? "活跃" : item.status === "warning" ? "告警" : "待命"} · 会话 ${item.activeSessions} · 任务 ${item.activeTasks}</span>
-    <small>${escapeHtml(item.currentTask ?? item.notes[0] ?? "当前无活跃任务")}</small>
+    <small>${escapeHtml(shortenText(item.currentTask ?? item.notes[0] ?? "当前无活跃任务", 74))}</small>
   </li>`;
 }
 
 function renderScheduleStory(item: DashboardInsights["schedules"]["items"][number]): string {
   return `<li>
     <strong>${escapeHtml(item.name)}</strong>
-    <span>${item.kind === "heartbeat" ? "心跳" : "Cron"} · ${item.enabled ? "启用" : "关闭"} · ${escapeHtml(item.nextRunAt ?? "暂无下次时间")}</span>
-    <small>${escapeHtml(item.error ?? item.lastStatus ?? "暂无执行结果")}</small>
+    <span>${item.kind === "heartbeat" ? "心跳" : "Cron"} · ${item.enabled ? "启用" : "关闭"} · ${escapeHtml(shortenText(item.nextRunAt ?? "暂无下次时间", 26))}</span>
+    <small>${escapeHtml(shortenText(item.error ?? item.lastStatus ?? "暂无执行结果", 94))}</small>
   </li>`;
 }
 
@@ -598,8 +646,41 @@ function renderAppScript(config: AppConfig): string {
   return `<script>
     (() => {
       const storageKey = "oldfish.localToken";
+      const prefetched = new Set();
       const tokenInput = document.querySelector("[data-token-input]");
       if (tokenInput) tokenInput.value = window.localStorage.getItem(storageKey) || "";
+
+      const prefetch = (href) => {
+        if (!href || prefetched.has(href) || href.startsWith("/logout")) return;
+        prefetched.add(href);
+        fetch(href, {
+          credentials: "same-origin",
+          headers: { "x-oldfish-prefetch": "1" },
+        }).catch(() => prefetched.delete(href));
+      };
+
+      document.querySelectorAll('a[href^="/"]').forEach((link) => {
+        link.addEventListener("click", (event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          document.body.classList.add("is-leaving");
+        });
+        link.addEventListener("mouseenter", () => {
+          const href = link.getAttribute("href");
+          prefetch(href);
+        }, { once: true });
+        link.addEventListener("focus", () => prefetch(link.getAttribute("href")), { once: true });
+      });
+
+      const warmLinks = () => {
+        document.querySelectorAll('.nav-link[href], .machine-card a[href], .staff-list-card[href]').forEach((link, index) => {
+          if (index < 8) prefetch(link.getAttribute("href"));
+        });
+      };
+      if ("requestIdleCallback" in window) {
+        window.requestIdleCallback(warmLinks, { timeout: 1200 });
+      } else {
+        window.setTimeout(warmLinks, 300);
+      }
 
       document.querySelector("[data-save-token]")?.addEventListener("click", () => {
         const value = tokenInput?.value?.trim() || "";
@@ -670,15 +751,16 @@ function renderLayout(title: string, body: string): string {
       <title>${escapeHtml(title)}</title>
       <style>
         :root {
-          --bg: #071013;
-          --bg-soft: #0d171b;
-          --panel: rgba(8, 20, 24, 0.92);
-          --panel-strong: rgba(11, 27, 31, 0.96);
-          --panel-border: rgba(77, 154, 184, 0.18);
+          --bg: #03070b;
+          --bg-soft: #091117;
+          --panel: rgba(7, 15, 20, 0.92);
+          --panel-strong: rgba(9, 20, 27, 0.96);
+          --panel-border: rgba(96, 237, 211, 0.16);
           --text: #f1f7f7;
-          --muted: #8ca6ad;
-          --accent: #79f0ff;
-          --accent-warm: #ffa758;
+          --muted: #8ea5af;
+          --accent: #7ef7d4;
+          --accent-cold: #63dcff;
+          --accent-warm: #ffb165;
           --danger: #ff5b6e;
           --ok: #56f39a;
           --warn: #ffd05c;
@@ -691,42 +773,122 @@ function renderLayout(title: string, body: string): string {
         * { box-sizing: border-box; }
         html, body { margin: 0; padding: 0; min-height: 100%; }
         body {
+          position: relative;
+          overflow-x: hidden;
           background:
-            radial-gradient(circle at top left, rgba(77, 154, 184, 0.18), transparent 28%),
-            radial-gradient(circle at top right, rgba(255, 167, 88, 0.12), transparent 24%),
-            linear-gradient(145deg, #04080a, #081317 42%, #09151a 100%);
+            radial-gradient(circle at 12% 12%, rgba(126, 247, 212, 0.13), transparent 22%),
+            radial-gradient(circle at 88% 14%, rgba(99, 220, 255, 0.12), transparent 18%),
+            radial-gradient(circle at 20% 86%, rgba(255, 177, 101, 0.08), transparent 18%),
+            linear-gradient(145deg, #010203, #04070b 34%, #061018 68%, #020407 100%);
           color: var(--text);
           font-family: var(--sans);
+        }
+
+        body::before,
+        body::after {
+          content: "";
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: -1;
+        }
+
+        body::before {
+          background:
+            linear-gradient(rgba(126, 247, 212, 0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(126, 247, 212, 0.07) 1px, transparent 1px),
+            repeating-linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.03) 0px,
+              rgba(255, 255, 255, 0.03) 1px,
+              transparent 1px,
+              transparent 4px
+            ),
+            linear-gradient(90deg, transparent 0%, rgba(99, 220, 255, 0.06) 48%, transparent 52%);
+          background-size: 150px 150px, 150px 150px, 100% 4px, 100% 100%;
+          mask-image: radial-gradient(circle at center, black 45%, transparent 95%);
+          opacity: 0.5;
+        }
+
+        body::after {
+          background:
+            radial-gradient(circle at 15% 18%, rgba(126, 247, 212, 0.18), transparent 12%),
+            radial-gradient(circle at 82% 75%, rgba(99, 220, 255, 0.18), transparent 12%),
+            linear-gradient(120deg, transparent 0%, rgba(126, 247, 212, 0.05) 42%, transparent 72%),
+            repeating-linear-gradient(135deg, rgba(126, 247, 212, 0.04) 0px, rgba(126, 247, 212, 0.04) 2px, transparent 2px, transparent 12px);
+          animation: driftGlow 18s linear infinite;
+          opacity: 0.8;
         }
 
         a { color: inherit; text-decoration: none; }
         code { font-family: var(--mono); }
         button, input, textarea { font: inherit; }
 
-        .app-shell, .edge-shell {
-          width: min(1680px, calc(100vw - 32px));
+        .app-shell, .edge-shell, .auth-shell {
+          width: min(1760px, calc(100vw - 32px));
           margin: 16px auto;
           display: grid;
           gap: 16px;
         }
 
-        .app-shell { grid-template-columns: 280px minmax(0, 1fr) 340px; align-items: start; }
+        .app-shell { grid-template-columns: 360px minmax(0, 1fr) 360px; align-items: start; }
         .edge-shell { grid-template-columns: 1fr; }
+        .auth-shell { min-height: calc(100vh - 32px); place-items: center; }
 
-        .sidebar, .rail, .main-column, .panel, .rail-panel, .brand-panel, .hero, .notice-banner {
+        .sidebar, .rail, .main-column, .panel, .rail-panel, .brand-panel, .hero, .notice-banner, .auth-card {
+          position: relative;
+          min-width: 0;
+          overflow: hidden;
           border: 1px solid var(--panel-border);
-          background: linear-gradient(180deg, rgba(12, 24, 28, 0.95), rgba(7, 16, 19, 0.95));
-          box-shadow: var(--shadow);
-          backdrop-filter: blur(18px);
+          background:
+            linear-gradient(180deg, rgba(10, 18, 25, 0.96), rgba(6, 11, 18, 0.94)),
+            radial-gradient(circle at top, rgba(126, 247, 212, 0.08), transparent 40%);
+          box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+          backdrop-filter: blur(22px);
         }
 
-        .sidebar, .rail { position: sticky; top: 16px; border-radius: var(--radius); padding: 18px; }
-        .main-column { border-radius: var(--radius); padding: 18px; }
-        .notice-banner { border-radius: 18px; padding: 12px 16px; margin-bottom: 14px; color: var(--accent); }
-        .brand-panel { border-radius: 22px; padding: 18px; margin-bottom: 14px; }
-        .brand-panel h1, .hero h1 { margin: 6px 0 10px; font-size: clamp(28px, 4vw, 42px); letter-spacing: 0.06em; }
+        .sidebar::before, .rail::before, .main-column::before, .panel::before, .rail-panel::before, .brand-panel::before, .hero::before, .auth-card::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          border: 1px solid rgba(99, 220, 255, 0.06);
+          mask: linear-gradient(135deg, transparent 10%, black 20%, black 80%, transparent 90%);
+          pointer-events: none;
+        }
+
+        .sidebar, .rail { position: sticky; top: 16px; border-radius: 32px; padding: 20px; }
+        .main-column { border-radius: 32px; padding: 22px; animation: panelEnter .28s ease; }
+        .notice-banner { border-radius: 20px; padding: 12px 16px; margin-bottom: 14px; color: var(--accent); }
+        .brand-panel { border-radius: 26px; padding: 20px; margin-bottom: 14px; }
+        .auth-card { width: min(560px, 100%); border-radius: 36px; padding: 32px; }
+        .brand-panel h1, .hero h1 {
+          margin: 6px 0 10px;
+          font-size: clamp(26px, 3.2vw, 42px);
+          line-height: 0.98;
+          letter-spacing: 0.03em;
+          overflow-wrap: anywhere;
+        }
+        .brand-panel h1 {
+          font-size: clamp(24px, 2.5vw, 34px);
+          letter-spacing: 0.01em;
+          word-break: break-word;
+        }
         .brand-panel p, .hero p, .section-copy, .copy-box, .meta, .empty-copy { color: var(--muted); line-height: 1.7; }
         .brand-meta, .meta, .eyebrow, .nav-link small, .facet-pill, .priority, .story-list small, .stack-item small { font-family: var(--mono); }
+        .brand-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .brand-user { margin-top: 10px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+        .logout-link {
+          display: inline-flex;
+          align-items: center;
+          padding: 8px 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.09);
+          background: rgba(255,255,255,0.03);
+          color: var(--muted);
+          font-family: var(--mono);
+          font-size: 12px;
+        }
         .eyebrow, .brand-chip {
           display: inline-flex;
           padding: 6px 10px;
@@ -742,25 +904,26 @@ function renderLayout(title: string, body: string): string {
         .nav-link {
           display: grid;
           gap: 6px;
-          padding: 12px 14px;
-          border-radius: 18px;
+          padding: 14px 16px;
+          border-radius: 22px;
           border: 1px solid transparent;
-          background: rgba(255, 255, 255, 0.02);
-          transition: 140ms ease;
+          background: rgba(255, 255, 255, 0.025);
+          transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
         }
         .nav-link:hover, .nav-link.active {
           border-color: rgba(121, 240, 255, 0.28);
           background: rgba(121, 240, 255, 0.08);
+          transform: translateX(4px);
         }
 
-        .hero { border-radius: 28px; padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; margin-bottom: 18px; }
+        .hero { border-radius: 34px; padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; margin-bottom: 18px; }
         .hero-grid, .grid-three, .grid-two, .card-grid, .metric-row, .metric-wall, .task-board { display: grid; gap: 16px; }
         .hero-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; }
         .hero-stat, .metric-wall > div, .metric-row > div {
           padding: 14px;
-          border-radius: 18px;
+          border-radius: 22px;
           border: 1px solid rgba(121, 240, 255, 0.12);
-          background: rgba(255, 255, 255, 0.02);
+          background: rgba(255, 255, 255, 0.03);
         }
         .hero-stat span, .metric-wall span, .metric-row span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; }
         .hero-stat strong, .metric-wall strong, .metric-row strong { display: block; margin-top: 8px; font-size: 20px; }
@@ -768,7 +931,7 @@ function renderLayout(title: string, body: string): string {
         .grid-three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 16px; }
         .grid-two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
         .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .panel, .rail-panel { border-radius: 24px; padding: 18px; }
+        .panel, .rail-panel { border-radius: 28px; padding: 20px; }
         .panel-large { min-height: 100%; }
         .section-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin: 18px 0 12px; }
         .section-head.compact { margin-top: 20px; }
@@ -777,21 +940,28 @@ function renderLayout(title: string, body: string): string {
         .stack-item, .workbench-link, .staff-list-card {
           display: grid;
           gap: 6px;
-          padding: 14px;
-          border-radius: 18px;
+          padding: 15px;
+          border-radius: 22px;
           border: 1px solid rgba(121, 240, 255, 0.1);
-          background: rgba(255, 255, 255, 0.02);
+          background: rgba(255, 255, 255, 0.03);
+          transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
         }
         .workbench-link.active, .staff-list-card.active { border-color: rgba(255, 167, 88, 0.34); background: rgba(255, 167, 88, 0.08); }
+        .workbench-link:hover, .staff-list-card:hover { transform: translateY(-2px); border-color: rgba(121, 240, 255, 0.22); }
         .copy-box {
           margin: 12px 0;
           padding: 14px;
-          border-radius: 18px;
+          border-radius: 22px;
           background: rgba(255, 255, 255, 0.03);
           border: 1px solid rgba(255, 255, 255, 0.06);
         }
         .detail-list, .alerts, .story-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
-        .detail-list li, .alerts li, .story-list li { color: var(--muted); line-height: 1.7; }
+        .detail-list li, .alerts li, .story-list li, .stack-item span, .stack-item small, .staff-list-copy small {
+          color: var(--muted);
+          line-height: 1.7;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
         .facet-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 14px; }
         .facet-pill { padding: 8px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.04); color: var(--muted); font-size: 12px; }
 
@@ -813,11 +983,11 @@ function renderLayout(title: string, body: string): string {
         .badge-running, .badge-info, .badge-ready { background: rgba(121, 240, 255, 0.14); color: var(--accent); }
         .priority { color: var(--accent-warm); }
         .task-board { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        .task-column { border-radius: 24px; border: 1px solid var(--panel-border); background: rgba(8, 20, 24, 0.85); padding: 16px; }
+        .task-column { border-radius: 28px; border: 1px solid var(--panel-border); background: rgba(8, 20, 24, 0.85); padding: 16px; }
         .task-column-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .task-column-body { display: grid; gap: 12px; }
         .task-card {
-          border-radius: 20px;
+          border-radius: 24px;
           border: 1px solid rgba(121, 240, 255, 0.12);
           background: rgba(255, 255, 255, 0.02);
           padding: 16px;
@@ -836,23 +1006,60 @@ function renderLayout(title: string, body: string): string {
         .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .action-danger { border-color: rgba(255, 91, 110, 0.24); background: rgba(255, 91, 110, 0.1); }
         .token-field { display: grid; gap: 8px; margin: 12px 0; color: var(--muted); }
-        .token-field input, .editor {
+        .token-field input, .editor, .auth-form input {
           width: 100%;
-          border-radius: 18px;
+          border-radius: 20px;
           border: 1px solid rgba(121, 240, 255, 0.16);
           background: rgba(4, 10, 12, 0.92);
           color: var(--text);
           padding: 14px 16px;
         }
         .editor { min-height: 420px; resize: vertical; font-family: var(--mono); line-height: 1.7; }
+        .auth-form { display: grid; gap: 14px; margin-top: 20px; }
+        .auth-form label { display: grid; gap: 8px; color: var(--muted); }
+        .auth-submit { margin-top: 8px; width: 100%; justify-content: center; }
+        .auth-error {
+          margin-top: 16px;
+          padding: 12px 14px;
+          border-radius: 18px;
+          color: #ffd7de;
+          background: rgba(255, 91, 110, 0.12);
+          border: 1px solid rgba(255, 91, 110, 0.18);
+        }
+        .auth-notice { margin-top: 16px; margin-bottom: 0; }
 
         .workbench-grid { align-items: start; }
         .staff-list-copy { display: grid; gap: 4px; text-align: right; color: var(--muted); }
-        .story-list li { padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        .story-list li { padding-bottom: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); overflow-wrap: anywhere; }
         .story-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+        .heartbeat-meta {
+          display: grid;
+          gap: 4px;
+          grid-template-columns: minmax(0, 1fr);
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        body.is-leaving .app-shell,
+        body.is-leaving .edge-shell {
+          opacity: 0.65;
+          transform: scale(0.994);
+          transition: opacity 160ms ease, transform 160ms ease;
+        }
+
+        @keyframes driftGlow {
+          0% { transform: translate3d(0, 0, 0) scale(1); }
+          50% { transform: translate3d(2%, -1%, 0) scale(1.02); }
+          100% { transform: translate3d(0, 0, 0) scale(1); }
+        }
+
+        @keyframes panelEnter {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
 
         @media (max-width: 1320px) {
-          .app-shell { grid-template-columns: 240px minmax(0, 1fr); }
+          .app-shell { grid-template-columns: 300px minmax(0, 1fr); }
           .rail { grid-column: 1 / -1; position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
           .rail-panel { min-height: 100%; }
         }
@@ -949,6 +1156,11 @@ function mapTaskStatusBadge(status: WorkItem["status"]): string {
 function formatUsageCost(cost: number | undefined, tokens: number | undefined): string {
   if (cost === undefined || tokens === undefined) return "未连接";
   return `${formatInt(tokens)} tokens / $${cost.toFixed(2)}`;
+}
+
+function shortenText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, Math.max(0, limit - 1))}…`;
 }
 
 function formatInt(value: number): string {

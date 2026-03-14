@@ -5,6 +5,7 @@ import type {
   AppConfig,
   DashboardInsights,
   InstanceSummary,
+  OperationalInsights,
   ScheduleItem,
   ScheduleSnapshot,
   WorkItem,
@@ -79,27 +80,67 @@ const DOC_FILE_NAMES = new Set([
 const MEMORY_FILE_NAMES = new Set(["MEMORY.md", "memory.md"]);
 const TEXT_FILE_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".jsonl"]);
 const WORKBENCH_FILE_LIMIT = 48;
+const operationalInsightsCache = new Map<string, { expiresAt: number; value: OperationalInsights }>();
+const workbenchCache = new Map<string, { expiresAt: number; value: WorkbenchSnapshot }>();
 
 export async function buildDashboardInsights(
   config: AppConfig,
   workItems: WorkItem[],
   localSummary: InstanceSummary,
 ): Promise<DashboardInsights> {
-  const openclawConfig = await loadOpenClawConfig(config.openclawHome);
-  const workspaceRoot = resolveWorkspaceRoot(config, openclawConfig);
-  const sessionRegistry = await loadSessionRegistry(config.openclawHome);
-  const docs = await loadWorkbench("docs", workspaceRoot, config.openclawHome, openclawConfig);
-  const memory = await loadWorkbench("memory", workspaceRoot, config.openclawHome, openclawConfig);
-  const agents = buildAgentInsights(openclawConfig, sessionRegistry, workItems, workspaceRoot);
-  const schedules = await loadSchedules(config.openclawHome, openclawConfig, localSummary.lastHeartbeatAt);
+  const operational = await buildOperationalInsights(config, workItems, localSummary);
+  const [memory, docs] = await Promise.all([
+    loadWorkbenchSnapshot(config, "memory"),
+    loadWorkbenchSnapshot(config, "docs"),
+  ]);
 
   return {
-    usage: await buildUsageSnapshot(config, openclawConfig, localSummary),
-    agents,
-    schedules,
+    ...operational,
     memory,
     docs,
   };
+}
+
+export async function buildOperationalInsights(
+  config: AppConfig,
+  workItems: WorkItem[],
+  localSummary: InstanceSummary,
+): Promise<OperationalInsights> {
+  const cacheKey = `${config.instanceId}:${localSummary.lastHeartbeatAt}:${buildWorkItemsFingerprint(workItems)}:${config.openclawHome ?? ""}:${config.codexHome ?? ""}:${config.subscriptionSnapshotPath ?? ""}`;
+  const cached = operationalInsightsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const openclawConfig = await loadOpenClawConfig(config.openclawHome);
+  const workspaceRoot = resolveWorkspaceRoot(config, openclawConfig);
+  const sessionRegistry = await loadSessionRegistry(config.openclawHome);
+  const value = {
+    usage: await buildUsageSnapshot(config, openclawConfig, localSummary),
+    agents: buildAgentInsights(openclawConfig, sessionRegistry, workItems, workspaceRoot),
+    schedules: await loadSchedules(config.openclawHome, openclawConfig, localSummary.lastHeartbeatAt),
+  } satisfies OperationalInsights;
+  operationalInsightsCache.set(cacheKey, {
+    expiresAt: Date.now() + config.dashboardCacheTtlMs,
+    value,
+  });
+  return value;
+}
+
+export async function loadWorkbenchSnapshot(
+  config: AppConfig,
+  kind: WorkbenchKind,
+): Promise<WorkbenchSnapshot> {
+  const cacheKey = `${config.instanceId}:${kind}:${config.openclawHome ?? ""}`;
+  const cached = workbenchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const openclawConfig = await loadOpenClawConfig(config.openclawHome);
+  const workspaceRoot = resolveWorkspaceRoot(config, openclawConfig);
+  const value = await loadWorkbench(kind, workspaceRoot, config.openclawHome, openclawConfig);
+  workbenchCache.set(cacheKey, {
+    expiresAt: Date.now() + Math.max(config.dashboardCacheTtlMs, 12000),
+    value,
+  });
+  return value;
 }
 
 export async function loadWorkbenchFileDetail(
@@ -109,7 +150,7 @@ export async function loadWorkbenchFileDetail(
 ): Promise<WorkbenchFileDetail | undefined> {
   const openclawConfig = await loadOpenClawConfig(config.openclawHome);
   const workspaceRoot = resolveWorkspaceRoot(config, openclawConfig);
-  const snapshot = await loadWorkbench(kind, workspaceRoot, config.openclawHome, openclawConfig);
+  const snapshot = await loadWorkbenchSnapshot(config, kind);
   const entry = snapshot.files.find((item) => item.relativePath === relativePath);
   if (!entry) return undefined;
 
@@ -127,6 +168,7 @@ export async function saveWorkbenchFile(
   if (!detail || !detail.entry.editable) return undefined;
 
   await writeFile(detail.entry.absolutePath, content, "utf8");
+  workbenchCache.delete(`${config.instanceId}:${kind}:${config.openclawHome ?? ""}`);
   return loadWorkbenchFileDetail(config, kind, relativePath);
 }
 
@@ -637,6 +679,12 @@ function roundCurrency(input: number): number {
 
 function uniqueStrings(input: string[]): string[] {
   return [...new Set(input.filter(Boolean))];
+}
+
+function buildWorkItemsFingerprint(workItems: WorkItem[]): string {
+  return workItems
+    .map((item) => `${item.workId}:${item.status}:${item.updatedAt ?? ""}:${item.stoppedAt ?? ""}`)
+    .join("|");
 }
 
 function readProviderFromOpenClawModels(openclawHome: string | undefined): string | undefined {

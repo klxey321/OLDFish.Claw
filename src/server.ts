@@ -1,13 +1,56 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { URL } from "node:url";
-import { buildDashboardInsights, loadWorkbenchFileDetail, saveWorkbenchFile } from "./runtime/openclaw-insights";
+import { URL, URLSearchParams } from "node:url";
+import {
+  buildDashboardInsights,
+  buildOperationalInsights,
+  loadWorkbenchFileDetail,
+  loadWorkbenchSnapshot,
+  saveWorkbenchFile,
+} from "./runtime/openclaw-insights";
+import {
+  clearSessionCookie,
+  isAuthEnabled,
+  isSecureRequest,
+  readSession,
+  requireApiAuth,
+  requirePageAuth,
+  setSessionCookie,
+  verifyPassword,
+} from "./runtime/auth";
 import { buildLocalSummary } from "./services/local-summary";
 import { buildMasterSummary } from "./services/master-summary";
-import type { AppConfig, WorkbenchKind } from "./types";
+import type {
+  AppConfig,
+  DashboardInsights,
+  InstanceConfig,
+  InstanceSummary,
+  OperationalInsights,
+  StaffView,
+  WorkItem,
+  WorkbenchKind,
+  WorkbenchSnapshot,
+} from "./types";
 import { loadInstances } from "./runtime/instances";
 import { loadWorkItems, stopWorkItem } from "./runtime/work-items";
 import { buildStaffViews } from "./services/control-room";
-import { renderEdgePage, renderMasterPage, type MasterSection } from "./ui/render";
+import { renderEdgePage, renderLoginPage, renderMasterPage, type MasterSection } from "./ui/render";
+
+interface MasterPageState {
+  summary: Awaited<ReturnType<typeof buildMasterSummary>>;
+  instances: InstanceConfig[];
+  workItems: WorkItem[];
+  staffViews: StaffView[];
+  operationalInsights: OperationalInsights;
+}
+
+const masterPageCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    value?: MasterPageState;
+    promise?: Promise<MasterPageState>;
+  }
+>();
 
 export function startServer(config: AppConfig) {
   const server = createServer(async (req, res) => {
@@ -36,6 +79,7 @@ export function startServer(config: AppConfig) {
 async function routeRequest(req: IncomingMessage, res: ServerResponse, config: AppConfig): Promise<void> {
   const method = req.method ?? "GET";
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
+  const session = readSession(req, config);
 
   if (url.pathname === "/healthz") {
     writeJson(res, 200, {
@@ -47,8 +91,23 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
     return;
   }
 
+  if (url.pathname === "/login") {
+    await routeLogin(req, res, config, url, session?.username);
+    return;
+  }
+
+  if (url.pathname === "/logout") {
+    if (method !== "GET" && method !== "POST") {
+      writeJson(res, 405, { ok: false, error: "method_not_allowed" });
+      return;
+    }
+    clearSessionCookie(res, isSecureRequest(req));
+    redirect(res, "/login?notice=logged-out");
+    return;
+  }
+
   if (url.pathname.startsWith("/api/")) {
-    if (!authorize(req, config)) {
+    if (!requireApiAuth(req, config)) {
       writeJson(res, 401, { ok: false, error: "unauthorized" });
       return;
     }
@@ -72,15 +131,16 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
     return;
   }
 
+  if (!requirePageAuth(req, config)) {
+    redirectToLogin(res, url);
+    return;
+  }
+
   if (config.role === "master" && isMasterSectionRoute(url.pathname)) {
-    const [summary, instances, workItems] = await Promise.all([
-      buildMasterSummary(config),
-      loadInstances(config.instancesPath),
-      loadWorkItems(config.workItemsPath),
-    ]);
-    const staffViews = buildStaffViews(summary, workItems);
-    const insights = await buildDashboardInsights(config, workItems, summary.master);
+    const pageState = await loadMasterPageState(config);
     const section = resolveMasterSection(url.pathname);
+    const workbench = await loadWorkbenchForSection(config, section);
+    const insights = mergeInsights(pageState.operationalInsights, workbench);
     const fileDetail =
       section === "memory" || section === "docs"
         ? await loadSelectedWorkbenchFile(config, section, url.searchParams.get("file"))
@@ -91,15 +151,16 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
       200,
       renderMasterPage({
         section,
-        summary,
+        summary: pageState.summary,
         config,
-        staffViews,
-        workItems,
-        instances,
+        staffViews: pageState.staffViews,
+        workItems: pageState.workItems,
+        instances: pageState.instances,
         insights,
         selectedStaffId: url.searchParams.get("node") ?? undefined,
         selectedFile: fileDetail,
         notice: mapNotice(url.searchParams.get("notice")),
+        sessionUsername: session?.username,
       }),
     );
     return;
@@ -107,11 +168,80 @@ async function routeRequest(req: IncomingMessage, res: ServerResponse, config: A
 
   if (url.pathname === "/") {
     const summary = await buildLocalSummary(config);
-    writeHtml(res, 200, renderEdgePage(summary));
+    writeHtml(res, 200, renderEdgePage(summary, session?.username));
     return;
   }
 
   writeJson(res, 404, { ok: false, error: "not_found" });
+}
+
+async function routeLogin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: AppConfig,
+  url: URL,
+  currentUser: string | undefined,
+): Promise<void> {
+  const next = normalizeNext(url.searchParams.get("next"));
+  if (currentUser) {
+    redirect(res, next);
+    return;
+  }
+
+  if (req.method === "GET") {
+    writeHtml(
+      res,
+      200,
+      renderLoginPage({
+        appName: config.appName,
+        next,
+        loginEnabled: isAuthEnabled(config),
+        notice: mapNotice(url.searchParams.get("notice")),
+      }),
+    );
+    return;
+  }
+
+  if (req.method !== "POST") {
+    writeJson(res, 405, { ok: false, error: "method_not_allowed" });
+    return;
+  }
+
+  const form = await readFormBody(req);
+  const username = (form.get("username") ?? "").toString().trim();
+  const password = (form.get("password") ?? "").toString();
+  const target = normalizeNext((form.get("next") ?? "").toString());
+
+  if (!isAuthEnabled(config)) {
+    writeHtml(
+      res,
+      200,
+      renderLoginPage({
+        appName: config.appName,
+        next: target,
+        loginEnabled: false,
+        error: "当前环境未启用登录口令，请联系管理员补齐 AUTH_REQUIRED / LOGIN_USERNAME / LOGIN_PASSWORD。",
+      }),
+    );
+    return;
+  }
+
+  if (!verifyPassword(username, password, config)) {
+    writeHtml(
+      res,
+      401,
+      renderLoginPage({
+        appName: config.appName,
+        next: target,
+        loginEnabled: true,
+        error: "用户名或密码错误。",
+      }),
+    );
+    return;
+  }
+
+  setSessionCookie(res, config, username, isSecureRequest(req));
+  redirect(res, target);
 }
 
 async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Promise<void> {
@@ -125,7 +255,8 @@ async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Pr
       writeJson(res, 404, { ok: false, error: "master_only" });
       return;
     }
-    writeJson(res, 200, await loadWorkItems(config.workItemsPath));
+    const state = await loadMasterPageState(config);
+    writeJson(res, 200, state.workItems);
     return;
   }
 
@@ -134,7 +265,8 @@ async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Pr
       writeJson(res, 404, { ok: false, error: "master_only" });
       return;
     }
-    writeJson(res, 200, await buildMasterSummary(config));
+    const state = await loadMasterPageState(config);
+    writeJson(res, 200, state.summary);
     return;
   }
 
@@ -143,8 +275,8 @@ async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Pr
       writeJson(res, 404, { ok: false, error: "master_only" });
       return;
     }
-    const instances = await loadInstances(config.instancesPath);
-    writeJson(res, 200, instances.map(({ authTokenEnvKey, ...rest }) => rest));
+    const state = await loadMasterPageState(config);
+    writeJson(res, 200, state.instances.map(({ authTokenEnvKey, ...rest }) => rest));
     return;
   }
 
@@ -153,14 +285,14 @@ async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Pr
       writeJson(res, 404, { ok: false, error: "master_only" });
       return;
     }
-    const [summary, workItems] = await Promise.all([buildMasterSummary(config), loadWorkItems(config.workItemsPath)]);
-    writeJson(res, 200, buildStaffViews(summary, workItems));
+    const state = await loadMasterPageState(config);
+    writeJson(res, 200, state.staffViews);
     return;
   }
 
   if (url.pathname === "/api/usage" || url.pathname === "/api/agents" || url.pathname === "/api/schedules") {
     const [localSummary, workItems] = await Promise.all([buildLocalSummary(config), loadWorkItems(config.workItemsPath)]);
-    const insights = await buildDashboardInsights(config, workItems, localSummary);
+    const insights = await buildOperationalInsights(config, workItems, localSummary);
     if (url.pathname === "/api/usage") writeJson(res, 200, insights.usage);
     if (url.pathname === "/api/agents") writeJson(res, 200, insights.agents);
     if (url.pathname === "/api/schedules") writeJson(res, 200, insights.schedules);
@@ -173,9 +305,7 @@ async function routeApiGet(res: ServerResponse, config: AppConfig, url: URL): Pr
       writeJson(res, 400, { ok: false, error: "invalid_kind" });
       return;
     }
-    const [localSummary, workItems] = await Promise.all([buildLocalSummary(config), loadWorkItems(config.workItemsPath)]);
-    const insights = await buildDashboardInsights(config, workItems, localSummary);
-    writeJson(res, 200, kind === "memory" ? insights.memory : insights.docs);
+    writeJson(res, 200, await loadWorkbenchSnapshot(config, kind));
     return;
   }
 
@@ -217,6 +347,7 @@ async function routeApiPost(req: IncomingMessage, res: ServerResponse, config: A
     }
 
     const item = await stopWorkItem(config.workItemsPath, workId, config.nodeName);
+    invalidateMasterPageCache(config);
     if (!item) {
       writeJson(res, 404, { ok: false, error: "work_item_not_found" });
       return;
@@ -243,6 +374,7 @@ async function routeApiPost(req: IncomingMessage, res: ServerResponse, config: A
     }
 
     const detail = await saveWorkbenchFile(config, kind, relativePath, content);
+    invalidateMasterPageCache(config);
     if (!detail) {
       writeJson(res, 404, { ok: false, error: "file_not_found_or_locked" });
       return;
@@ -253,6 +385,92 @@ async function routeApiPost(req: IncomingMessage, res: ServerResponse, config: A
   }
 
   writeJson(res, 404, { ok: false, error: "not_found" });
+}
+
+async function loadMasterPageState(config: AppConfig): Promise<MasterPageState> {
+  const cacheKey = `${config.instanceId}:master-page`;
+  const cached = masterPageCache.get(cacheKey);
+  if (cached?.value && cached.expiresAt > Date.now()) return cached.value;
+  if (cached?.promise) return cached.promise;
+
+  const promise = (async () => {
+    const [summary, instances, workItems] = await Promise.all([
+      buildMasterSummary(config),
+      loadInstances(config.instancesPath),
+      loadWorkItems(config.workItemsPath),
+    ]);
+    const staffViews = buildStaffViews(summary, workItems);
+    const operationalInsights = await buildOperationalInsights(config, workItems, summary.master);
+    return {
+      summary,
+      instances,
+      workItems,
+      staffViews,
+      operationalInsights,
+    } satisfies MasterPageState;
+  })();
+
+  masterPageCache.set(cacheKey, {
+    expiresAt: Date.now() + config.dashboardCacheTtlMs,
+    promise,
+  });
+
+  try {
+    const value = await promise;
+    masterPageCache.set(cacheKey, {
+      expiresAt: Date.now() + config.dashboardCacheTtlMs,
+      value,
+    });
+    return value;
+  } catch (error) {
+    masterPageCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+function invalidateMasterPageCache(config: AppConfig): void {
+  masterPageCache.delete(`${config.instanceId}:master-page`);
+}
+
+async function loadWorkbenchForSection(
+  config: AppConfig,
+  section: MasterSection,
+): Promise<Pick<DashboardInsights, "memory" | "docs">> {
+  if (section === "memory") {
+    return {
+      memory: await loadWorkbenchSnapshot(config, "memory"),
+      docs: emptyWorkbenchSnapshot("docs"),
+    };
+  }
+  if (section === "docs") {
+    return {
+      memory: emptyWorkbenchSnapshot("memory"),
+      docs: await loadWorkbenchSnapshot(config, "docs"),
+    };
+  }
+  return {
+    memory: emptyWorkbenchSnapshot("memory"),
+    docs: emptyWorkbenchSnapshot("docs"),
+  };
+}
+
+function mergeInsights(
+  operational: OperationalInsights,
+  workbench: Pick<DashboardInsights, "memory" | "docs">,
+): DashboardInsights {
+  return {
+    ...operational,
+    ...workbench,
+  };
+}
+
+function emptyWorkbenchSnapshot(kind: WorkbenchKind): WorkbenchSnapshot {
+  return {
+    kind,
+    connected: false,
+    facets: [],
+    files: [],
+  };
 }
 
 async function loadSelectedWorkbenchFile(
@@ -271,22 +489,24 @@ function normalizeWorkbenchKind(input: string | undefined): WorkbenchKind | unde
 function mapNotice(input: string | null): string | undefined {
   if (input === "task-stopped") return "任务已停止，并回写到本地任务清单。";
   if (input === "file-saved") return "文件已保存到 OpenClaw 实际工作目录。";
+  if (input === "logged-out") return "你已退出登录。";
   return undefined;
 }
 
-function authorize(req: IncomingMessage, config: AppConfig): boolean {
-  if (!config.localTokenAuthRequired) return true;
-  if (config.localApiToken === "") return true;
+function normalizeNext(input: string | null): string {
+  if (!input || !input.startsWith("/") || input.startsWith("//")) return "/";
+  return input;
+}
 
-  const headerToken = req.headers["x-local-token"];
-  if (typeof headerToken === "string" && headerToken.trim() === config.localApiToken) return true;
+function redirectToLogin(res: ServerResponse, url: URL): void {
+  const next = `${url.pathname}${url.search}`;
+  const params = new URLSearchParams({ next });
+  redirect(res, `/login?${params.toString()}`);
+}
 
-  const authHeader = req.headers.authorization;
-  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-    return authHeader.slice("Bearer ".length).trim() === config.localApiToken;
-  }
-
-  return false;
+function redirect(res: ServerResponse, location: string): void {
+  res.writeHead(302, { location });
+  res.end();
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -296,6 +516,14 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+}
+
+async function readFormBody(req: IncomingMessage): Promise<URLSearchParams> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 
 function writeHtml(res: ServerResponse, status: number, html: string): void {

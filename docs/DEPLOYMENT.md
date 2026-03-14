@@ -54,10 +54,16 @@ PORT=4310
 INSTANCES_PATH=runtime/instances.json
 WORK_ITEMS_PATH=runtime/work-items.json
 LOCAL_API_TOKEN=<master-token>
+AUTH_REQUIRED=true
+LOGIN_USERNAME=<panel-username>
+LOGIN_PASSWORD=<panel-password>
+SESSION_SECRET=<random-secret>
+SESSION_TTL_HOURS=12
 FILE_EDIT_ENABLED=true
 TASK_CONTROL_ENABLED=true
 OPENCLAW_HOME=/root/.openclaw
 OPENCLAW_SUBSCRIPTION_SNAPSHOT_PATH=<optional-subscription-snapshot>
+DASHBOARD_CACHE_TTL_MS=6000
 ```
 
 ### 启动
@@ -87,6 +93,10 @@ DEPARTMENT=设计部
 PORT=4311
 LOCAL_STATE_PATH=runtime/local-state.json
 LOCAL_API_TOKEN=<edge-token>
+AUTH_REQUIRED=true
+LOGIN_USERNAME=<panel-username>
+LOGIN_PASSWORD=<panel-password>
+SESSION_SECRET=<random-secret>
 OPENCLAW_HOME=/root/.openclaw
 ```
 
@@ -176,6 +186,14 @@ curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/agents
 curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/schedules
 ```
 
+### 登录验收
+
+```bash
+curl -i http://127.0.0.1:4310/
+curl -i -c cookie.txt -d "username=<panel-username>&password=<panel-password>" -X POST http://127.0.0.1:4310/login
+curl -b cookie.txt http://127.0.0.1:4310/
+```
+
 ## 8. 反向代理建议
 
 推荐：
@@ -184,6 +202,8 @@ curl -H "x-local-token: <master-token>" http://127.0.0.1:4310/api/schedules
 - Edge 仅对 Master 所在网络开放
 - 优先走内网、VPN 或 Tailscale
 - 域名只有在 DNS 真实解析到主控机或前置反向代理时，才能签发 HTTPS 证书
+- 登录口令只放在服务器 `.env`，不要写进仓库或实例注册表
+- `SESSION_SECRET` 使用强随机字符串，改动后需要重启服务
 
 不推荐：
 

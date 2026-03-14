@@ -219,6 +219,17 @@ export interface DashboardInsights {
   docs: WorkbenchSnapshot;
 }
 
+export interface OperationalInsights {
+  usage: UsageSnapshot;
+  agents: AgentInsight[];
+  schedules: ScheduleSnapshot;
+}
+
+export interface AuthSession {
+  username: string;
+  expiresAt: number;
+}
+
 export interface AppConfig {
   role: AppRole;
   host: string;
@@ -239,10 +250,16 @@ export interface AppConfig {
   workItemsPath: string;
   localTokenAuthRequired: boolean;
   localApiToken: string;
+  authRequired: boolean;
+  loginUsername?: string;
+  loginPassword?: string;
+  sessionSecret: string;
+  sessionTtlHours: number;
   fileEditEnabled: boolean;
   taskControlEnabled: boolean;
   masterFetchTimeoutMs: number;
   uiRefreshSeconds: number;
+  dashboardCacheTtlMs: number;
   defaultStatus: HealthState;
   defaultSessionsActive: number;
   defaultQueueDepth: number;
